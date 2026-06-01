@@ -1,0 +1,36 @@
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen2.5:7b"
+  temperature: 0.85
+  max_tokens: 1024
+  context_window: 8192
+
+tts:
+  voice: "pt-BR-FranciscaNeural"
+  rate: "+5%"
+  pitch: "+0Hz"
+  enabled: true
+
+stt:
+  model: "base"
+  language: "pt"
+  enabled: false
+
+memory:
+  short_term_limit: 20
+  db_path: "data/memory.db"
+  auto_save_facts: true
+
+server:
+  host: "localhost"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+
+personality:
+  file: "configs/personality.json"
+
+logging:
+  level: "INFO"
+  file: "logs/krirk.log"

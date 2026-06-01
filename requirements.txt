@@ -1,0 +1,42 @@
+# ============================================
+# KRIRK Backend - Fase 1 MVP
+# Python 3.11+ recomendado (3.14 pode ter
+# incompatibilidades em pacotes de audio)
+# ============================================
+
+# Core API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+websockets>=13.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pyyaml>=6.0.0
+aiofiles>=24.0.0
+
+# LLM local
+ollama>=0.4.0
+
+# TTS (requer internet para edge-tts)
+edge-tts>=6.1.0
+
+# Audio (gravação de microfone)
+sounddevice>=0.4.6
+numpy>=1.26.0
+scipy>=1.12.0
+
+# STT - Descomente se usar Python 3.11/3.12:
+# faster-whisper>=1.0.0
+# openai-whisper>=20240930
+
+# Memória vetorial (Fase 5 - descomente quando precisar)
+# chromadb>=0.5.0
+# sentence-transformers>=3.0.0
+
+# Automação desktop (Fase 4)
+# pyautogui>=0.9.54
+# playwright>=1.45.0
+
+# Visão computacional (Fase 3)
+# mss>=9.0.0
+# pillow>=10.0.0
+# easyocr>=1.7.0
