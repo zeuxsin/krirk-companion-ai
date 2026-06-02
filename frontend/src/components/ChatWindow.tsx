@@ -160,6 +160,16 @@ export function ChatWindow({ sendMessage, onEvent, connected, aiStateBusy }: Pro
     sendMessage(text)
   }, [addMessage, sendMessage])
 
+  // Erros do VoiceButton exibidos como mensagem de sistema
+  const handleVoiceError = useCallback((msg: string) => {
+    addMessage({
+      id: `err-${Date.now()}`,
+      role: 'assistant',
+      content: msg,
+      timestamp: new Date(),
+    })
+  }, [addMessage])
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -205,6 +215,7 @@ export function ChatWindow({ sendMessage, onEvent, connected, aiStateBusy }: Pro
       }}>
         <VoiceButton
           onTranscript={handleTranscript}
+          onError={handleVoiceError}
           disabled={!connected || aiStateBusy}
         />
         <input

@@ -2,31 +2,55 @@ import React, { useState, useRef, useCallback } from 'react'
 
 interface Props {
   onTranscript: (text: string) => void
+  onError?: (msg: string) => void
   disabled?: boolean
 }
 
-// Tipagem da Web Speech API (não está no lib padrão do TS)
 declare global {
   interface Window {
-    SpeechRecognition: typeof SpeechRecognition
-    webkitSpeechRecognition: typeof SpeechRecognition
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    webkitSpeechRecognition: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    SpeechRecognition: any
   }
 }
 
-export function VoiceButton({ onTranscript, disabled }: Props) {
+const ERROR_MESSAGES: Record<string, string> = {
+  'not-allowed':
+    '🎙️ Permissão de microfone negada. Clique no ícone de cadeado na barra do navegador e permita o microfone.',
+  'service-not-allowed':
+    '🚫 Seu navegador bloqueou o serviço de voz. Se usar Brave: vá em Configurações → Privacidade → desative "Block fingerprinting". Se usar outro navegador, tente Chrome ou Edge.',
+  'network':
+    '🌐 Erro de rede na API de voz. Verifique sua conexão — a Web Speech API precisa de internet.',
+  'audio-capture':
+    '🎙️ Microfone não encontrado ou ocupado por outro app.',
+  'no-speech':
+    '🔇 Nenhuma fala detectada. Tente falar mais perto do microfone.',
+  'language-not-supported':
+    '🌍 Idioma pt-BR não suportado neste navegador.',
+  'aborted': '', // silencioso — usuário cancelou
+}
+
+export function VoiceButton({ onTranscript, onError, disabled }: Props) {
   const [listening, setListening] = useState(false)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const recognitionRef = useRef<InstanceType<typeof window.SpeechRecognition> | null>(null)
+
+  const stop = useCallback(() => {
+    recognitionRef.current?.stop()
+    setListening(false)
+  }, [])
 
   const toggle = useCallback(() => {
     if (listening) {
-      recognitionRef.current?.stop()
-      setListening(false)
+      stop()
       return
     }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) {
-      alert('Reconhecimento de voz não suportado.\nUse Chrome ou Edge para esta função.')
+      onError?.(
+        '❌ Web Speech API não disponível neste navegador. Use Google Chrome ou Microsoft Edge para usar voz.'
+      )
       return
     }
 
@@ -36,22 +60,32 @@ export function VoiceButton({ onTranscript, disabled }: Props) {
     recognition.interimResults = false
     recognition.maxAlternatives = 1
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = event.results[0][0].transcript.trim()
       if (transcript) onTranscript(transcript)
     }
 
-    recognition.onerror = (event) => {
-      console.warn('[STT]', event.error)
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      const msg = ERROR_MESSAGES[event.error]
+      // string vazia = silencioso (aborted), undefined = erro desconhecido
+      if (msg === undefined) {
+        onError?.(`⚠️ Erro de voz: ${event.error}`)
+      } else if (msg) {
+        onError?.(msg)
+      }
       setListening(false)
     }
 
     recognition.onend = () => setListening(false)
 
     recognitionRef.current = recognition
-    recognition.start()
-    setListening(true)
-  }, [listening, onTranscript])
+    try {
+      recognition.start()
+      setListening(true)
+    } catch (e) {
+      onError?.(`⚠️ Não foi possível iniciar o reconhecimento de voz: ${e}`)
+    }
+  }, [listening, stop, onTranscript, onError])
 
   return (
     <button
