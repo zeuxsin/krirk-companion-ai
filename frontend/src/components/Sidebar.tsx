@@ -1,7 +1,7 @@
 import React from 'react'
 import { EmotionType, AIState } from '../types'
 
-export type AppMode = 'chat' | 'hud' | 'avatar' | 'settings'
+export type AppMode = 'chat' | 'sidebar' | 'avatar' | 'settings'
 
 const EMOTION_COLOR: Record<EmotionType, string> = {
   neutral:    '#71717a',
@@ -17,7 +17,7 @@ const EMOTION_COLOR: Record<EmotionType, string> = {
 
 const MODE_ITEMS: { id: AppMode; label: string; icon: string }[] = [
   { id: 'chat',     label: 'Chat',          icon: '💬' },
-  { id: 'hud',      label: 'HUD',           icon: '🪟' },
+  { id: 'sidebar',  label: 'Sidebar',       icon: '🪟' },
   { id: 'avatar',   label: 'Avatar',        icon: '✨' },
   { id: 'settings', label: 'Configurações', icon: '⚙️' },
 ]
