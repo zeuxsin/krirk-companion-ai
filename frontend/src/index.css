@@ -1,7 +1,6 @@
-@import "tailwindcss";
+/* KRIRK — Estilos globais (sem Tailwind — usa CSS custom properties) */
 
-@theme {
-  /* Paleta KRIRK */
+:root {
   --color-krirk-bg:      #0a0b12;
   --color-krirk-sidebar: #0f1020;
   --color-krirk-surface: #161728;
@@ -14,7 +13,7 @@
   --color-krirk-offline: #ef4444;
 }
 
-* {
+*, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -66,9 +65,6 @@ body {
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes spin-dot {
-  to { transform: rotate(360deg); }
 }
 
 .anim-float      { animation: float      3s ease-in-out infinite; }
