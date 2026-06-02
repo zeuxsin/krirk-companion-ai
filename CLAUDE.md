@@ -108,6 +108,7 @@ ollama:
 ## Notas importantes
 
 - **Python 3.14**: faster-whisper pode não ter wheels. Use `stt.enabled: false` em config.yaml ou instale Python 3.11/3.12 em venv separado.
-- **edge-tts**: requer conexão com internet para gerar áudio.
+- **edge-tts**: requer conexão com internet para gerar áudio (TTS).
 - **Ollama**: deve estar rodando em `http://localhost:11434` antes de iniciar o backend.
 - **Dados do usuário**: `data/memory.db` não é versionado no git (dados pessoais).
+- **Voz (STT)**: usa Web Speech API do browser — requer **Chrome ou Edge**. Brave, Firefox e outros não suportam. A API também precisa de internet (envia áudio para o Google/Microsoft).
