@@ -1,6 +1,6 @@
 ollama:
   base_url: "http://localhost:11434"
-  model: "qwen2.5:7b"
+  model: "gemma3:4b"
   temperature: 0.85
   max_tokens: 1024
   context_window: 8192

@@ -1,61 +1,69 @@
 import React, { useState, useRef, useCallback } from 'react'
 
 interface Props {
-  onAudio: (base64: string) => void
+  onTranscript: (text: string) => void
   disabled?: boolean
 }
 
-export function VoiceButton({ onAudio, disabled }: Props) {
-  const [recording, setRecording] = useState(false)
-  const mediaRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
+// Tipagem da Web Speech API (não está no lib padrão do TS)
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition
+    webkitSpeechRecognition: typeof SpeechRecognition
+  }
+}
 
-  const start = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-      mediaRef.current = recorder
-      chunksRef.current = []
+export function VoiceButton({ onTranscript, disabled }: Props) {
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
-
-      recorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        const buffer = await blob.arrayBuffer()
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(buffer)))
-        onAudio(b64)
-        stream.getTracks().forEach((t) => t.stop())
-      }
-
-      recorder.start()
-      setRecording(true)
-    } catch (err) {
-      alert('Microfone não disponível: ' + err)
+  const toggle = useCallback(() => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      return
     }
-  }, [onAudio])
 
-  const stop = useCallback(() => {
-    mediaRef.current?.stop()
-    setRecording(false)
-  }, [])
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) {
+      alert('Reconhecimento de voz não suportado.\nUse Chrome ou Edge para esta função.')
+      return
+    }
+
+    const recognition = new SR()
+    recognition.lang = 'pt-BR'
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.trim()
+      if (transcript) onTranscript(transcript)
+    }
+
+    recognition.onerror = (event) => {
+      console.warn('[STT]', event.error)
+      setListening(false)
+    }
+
+    recognition.onend = () => setListening(false)
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setListening(true)
+  }, [listening, onTranscript])
 
   return (
     <button
-      onMouseDown={start}
-      onMouseUp={stop}
-      onMouseLeave={stop}
-      onTouchStart={start}
-      onTouchEnd={stop}
+      onClick={toggle}
       disabled={disabled}
-      title="Segure para falar"
+      title={listening ? 'Clique para parar' : 'Clique para falar (pt-BR)'}
       style={{
         width: 40,
         height: 40,
         borderRadius: '50%',
         border: 'none',
-        background: recording ? '#ef4444' : '#3f3f46',
+        background: listening ? '#ef4444' : '#3f3f46',
         color: '#e4e4e7',
         cursor: disabled ? 'not-allowed' : 'pointer',
         display: 'flex',
@@ -64,10 +72,11 @@ export function VoiceButton({ onAudio, disabled }: Props) {
         fontSize: '18px',
         transition: 'background 0.15s',
         flexShrink: 0,
-        boxShadow: recording ? '0 0 0 4px rgba(239,68,68,0.3)' : 'none',
+        boxShadow: listening ? '0 0 0 4px rgba(239,68,68,0.3)' : 'none',
+        opacity: disabled ? 0.5 : 1,
       }}
     >
-      {recording ? '⏹' : '🎙️'}
+      {listening ? '⏹' : '🎙️'}
     </button>
   )
 }

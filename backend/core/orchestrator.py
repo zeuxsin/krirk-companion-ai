@@ -105,8 +105,9 @@ class Orchestrator:
 
         text = await self.stt.transcribe_base64(audio_b64)
         if not text:
-            yield {"type": "error", "message": "Não consegui entender o áudio. STT habilitado?"}
             self.state.set(AISystemState.IDLE)
+            yield {"type": "error", "message": "STT desabilitado ou sem resultado. Ative em configs/config.yaml ou use texto."}
+            yield {"type": "status", "state": "idle"}
             return
 
         yield {"type": "transcription", "content": text}

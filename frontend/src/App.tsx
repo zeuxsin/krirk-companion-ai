@@ -22,7 +22,6 @@ export default function App() {
       />
       <ChatWindow
         sendMessage={sendMessage}
-        sendAudio={sendAudio}
         onEvent={onEvent}
         connected={connected}
         aiStateBusy={aiStateBusy}

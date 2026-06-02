@@ -46,11 +46,18 @@ export function useWebSocket(): UseWebSocketReturn {
         if (event.type === 'status' && event.state) {
           setAiState(event.state)
         }
+
+        // Erros sempre resetam para idle
+        if (event.type === 'error') {
+          setAiState('idle')
+        }
+
         if (event.emotion) {
           setEmotion(event.emotion)
         }
-        if (event.type === 'response_complete' && event.emotion) {
-          setEmotion(event.emotion)
+
+        if (event.type === 'response_complete') {
+          if (event.emotion) setEmotion(event.emotion)
           setAiState('idle')
         }
 

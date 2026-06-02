@@ -5,33 +5,37 @@ import { VoiceButton } from './VoiceButton'
 
 interface Props {
   sendMessage: (content: string) => void
-  sendAudio: (base64: string) => void
   onEvent: (handler: (e: WSEvent) => void) => () => void
   connected: boolean
   aiStateBusy: boolean
 }
 
-function playAudio(b64: string) {
+// Reproduz áudio MP3 base64 usando AudioContext — mais confiável que new Audio()
+async function playAudioBase64(b64: string): Promise<void> {
   try {
-    const binary = atob(b64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const blob = new Blob([bytes], { type: 'audio/mpeg' })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    audio.play().catch(() => {})
-    audio.onended = () => URL.revokeObjectURL(url)
-  } catch {
-    // silence errors
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+    const ctx = new AudioContext()
+    // Resume o contexto caso esteja suspenso pela política de autoplay
+    if (ctx.state === 'suspended') await ctx.resume()
+    const buffer = await ctx.decodeAudioData(bytes.buffer)
+    const source = ctx.createBufferSource()
+    source.buffer = buffer
+    source.connect(ctx.destination)
+    source.start(0)
+    source.onended = () => ctx.close()
+  } catch (e) {
+    console.warn('[TTS] Playback failed:', e)
   }
 }
 
-export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiStateBusy }: Props) {
+export function ChatWindow({ sendMessage, onEvent, connected, aiStateBusy }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [streamingId, setStreamingId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Ref em vez de state — evita stale closure dentro do useEffect
+  const streamingIdRef = useRef<string | null>(null)
 
   const addMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg])
@@ -39,25 +43,22 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
 
   const appendToken = useCallback((id: string, token: string) => {
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, content: m.content + token } : m
-      )
+      prev.map((m) => (m.id === id ? { ...m, content: m.content + token } : m))
     )
   }, [])
 
-  const finalizeStreaming = useCallback((id: string, emotion?: string) => {
+  const finalizeMessage = useCallback((id: string, emotion?: string) => {
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === id ? { ...m, isStreaming: false, emotion: emotion as any } : m
+        m.id === id ? { ...m, isStreaming: false, emotion: emotion as never } : m
       )
     )
-    setStreamingId(null)
   }, [])
 
+  // Efeito registrado UMA vez — lê streamingIdRef (sempre fresco) sem precisar de deps
   useEffect(() => {
-    const streamingMsgId = `ai-${Date.now()}`
-
     const unsub = onEvent((event: WSEvent) => {
+      // Mensagem de boas-vindas ao conectar
       if (event.type === 'connected' && event.message) {
         addMessage({
           id: `ai-${Date.now()}`,
@@ -68,6 +69,7 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
         return
       }
 
+      // Transcrição de voz chegou (fallback de STT no backend)
       if (event.type === 'transcription' && event.content) {
         addMessage({
           id: `user-${Date.now()}`,
@@ -78,10 +80,11 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
         return
       }
 
+      // Token de streaming
       if (event.type === 'token' && event.content) {
-        if (!streamingId) {
+        if (!streamingIdRef.current) {
           const newId = `ai-${Date.now()}`
-          setStreamingId(newId)
+          streamingIdRef.current = newId
           addMessage({
             id: newId,
             role: 'assistant',
@@ -90,23 +93,44 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
             isStreaming: true,
           })
         } else {
-          appendToken(streamingId, event.content)
+          appendToken(streamingIdRef.current, event.content)
         }
+        return
       }
 
+      // Resposta completa — finaliza streaming e toca áudio
       if (event.type === 'response_complete') {
-        if (streamingId) {
-          finalizeStreaming(streamingId, event.emotion)
+        if (streamingIdRef.current) {
+          finalizeMessage(streamingIdRef.current, event.emotion)
+          streamingIdRef.current = null
         }
         if (event.audio) {
-          playAudio(event.audio)
+          playAudioBase64(event.audio)
         }
+        return
+      }
+
+      // Erro do backend — mostra como mensagem do sistema
+      if (event.type === 'error' && event.message) {
+        // Finaliza streaming pendente se houver
+        if (streamingIdRef.current) {
+          finalizeMessage(streamingIdRef.current)
+          streamingIdRef.current = null
+        }
+        addMessage({
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: `⚠️ ${event.message}`,
+          timestamp: new Date(),
+        })
       }
     })
 
     return unsub
-  }, [onEvent, addMessage, appendToken, finalizeStreaming, streamingId])
+    // Deps estáveis — onEvent/addMessage/appendToken/finalizeMessage não mudam
+  }, [onEvent, addMessage, appendToken, finalizeMessage])
 
+  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -114,7 +138,6 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
   const submit = useCallback(() => {
     const text = input.trim()
     if (!text || !connected || aiStateBusy) return
-
     addMessage({
       id: `user-${Date.now()}`,
       role: 'user',
@@ -125,6 +148,17 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
     setInput('')
     inputRef.current?.focus()
   }, [input, connected, aiStateBusy, addMessage, sendMessage])
+
+  // Voz: transcrição já chega como texto, envia direto
+  const handleTranscript = useCallback((text: string) => {
+    addMessage({
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: new Date(),
+    })
+    sendMessage(text)
+  }, [addMessage, sendMessage])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -169,13 +203,16 @@ export function ChatWindow({ sendMessage, sendAudio, onEvent, connected, aiState
         alignItems: 'center',
         background: '#18181b',
       }}>
-        <VoiceButton onAudio={sendAudio} disabled={!connected || aiStateBusy} />
+        <VoiceButton
+          onTranscript={handleTranscript}
+          disabled={!connected || aiStateBusy}
+        />
         <input
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={connected ? 'Escreva para a Krirk...' : 'Conectando...'}
+          placeholder={connected ? 'Escreva para a Krirk...' : 'Reconectando...'}
           disabled={!connected || aiStateBusy}
           style={{
             flex: 1,
