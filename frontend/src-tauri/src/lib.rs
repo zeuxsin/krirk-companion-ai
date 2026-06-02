@@ -24,6 +24,39 @@ fn close_settings(app: tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn set_compact_mode(window: tauri::WebviewWindow, compact: bool) -> Result<(), String> {
+    use tauri::{LogicalSize, LogicalPosition};
+
+    if compact {
+        let monitor = window.current_monitor()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Monitor não encontrado".to_string())?;
+
+        let scale = monitor.scale_factor();
+        let phys  = monitor.size();
+        let sw = phys.width  as f64 / scale;
+        let sh = phys.height as f64 / scale;
+
+        let (w, h, taskbar) = (230.0_f64, 400.0_f64, 48.0_f64);
+
+        window.set_size(LogicalSize::new(w, h))
+            .map_err(|e| e.to_string())?;
+        window.set_position(LogicalPosition::new(sw - w - 16.0, sh - h - taskbar))
+            .map_err(|e| e.to_string())?;
+        window.set_always_on_top(true)
+            .map_err(|e| e.to_string())?;
+    } else {
+        window.set_size(LogicalSize::new(560.0_f64, 420.0_f64))
+            .map_err(|e| e.to_string())?;
+        window.center()
+            .map_err(|e| e.to_string())?;
+        window.set_always_on_top(false)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,6 +64,7 @@ pub fn run() {
             set_always_on_top,
             open_settings,
             close_settings,
+            set_compact_mode,
         ])
         .setup(|app| {
             // System Tray
