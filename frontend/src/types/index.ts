@@ -18,6 +18,7 @@ export interface Message {
   emotion?: EmotionType
   timestamp: Date
   isStreaming?: boolean
+  thumbnail?: string  // base64 JPEG de screenshot para exibir no chat
 }
 
 export interface WSEvent {
@@ -27,6 +28,7 @@ export interface WSEvent {
   state?: AIState
   message?: string
   audio?: string
+  thumbnail?: string  // base64 JPEG (evento screenshot_taken)
   status?: {
     state: AIState
     emotion: EmotionType

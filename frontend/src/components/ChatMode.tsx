@@ -38,7 +38,7 @@ function Bubble({ msg }: { msg: Message }) {
       )}
       <div style={{
         maxWidth: '72%',
-        padding: '9px 13px',
+        padding: msg.thumbnail && !msg.content ? '6px' : '9px 13px',
         borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
         background: isUser ? 'var(--color-krirk-accent)' : 'rgba(255,255,255,0.06)',
         border: isUser ? 'none' : '1px solid var(--color-krirk-border)',
@@ -48,6 +48,18 @@ function Bubble({ msg }: { msg: Message }) {
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
       }}>
+        {msg.thumbnail && (
+          <img
+            src={msg.thumbnail}
+            alt="screenshot"
+            style={{
+              maxWidth: '100%', borderRadius: 6,
+              display: 'block',
+              marginBottom: msg.content ? 6 : 0,
+              opacity: 0.9,
+            }}
+          />
+        )}
         {msg.content}
         {msg.isStreaming && (
           <span style={{
@@ -65,6 +77,7 @@ function Bubble({ msg }: { msg: Message }) {
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface Props {
   sendMessage: (text: string) => void
+  sendScreenshot: (prompt: string) => void
   onEvent: (handler: (e: WSEvent) => void) => () => void
   connected: boolean
   aiStateBusy: boolean
@@ -72,7 +85,7 @@ interface Props {
 }
 
 // ─── ChatMode ─────────────────────────────────────────────────────────────────
-export function ChatMode({ sendMessage, onEvent, connected, aiStateBusy, onMessageCountChange }: Props) {
+export function ChatMode({ sendMessage, sendScreenshot, onEvent, connected, aiStateBusy, onMessageCountChange }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -120,6 +133,16 @@ export function ChatMode({ sendMessage, onEvent, connected, aiStateBusy, onMessa
         if (ev.audio) playAudioBase64(ev.audio)
         return
       }
+      if (ev.type === 'screenshot_taken' && ev.thumbnail) {
+        addMsg({
+          id: `screenshot-${Date.now()}`,
+          role: 'assistant',
+          content: '',
+          thumbnail: `data:image/jpeg;base64,${ev.thumbnail}`,
+          timestamp: new Date(),
+        })
+        return
+      }
       if (ev.type === 'error' && ev.message) {
         if (streamingIdRef.current) { finalizeMsg(streamingIdRef.current); streamingIdRef.current = null }
         addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: `⚠️ ${ev.message}`, timestamp: new Date() })
@@ -149,6 +172,12 @@ export function ChatMode({ sendMessage, onEvent, connected, aiStateBusy, onMessa
   const handleVoiceError = useCallback((msg: string) => {
     addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date() })
   }, [addMsg])
+
+  const handleScreenshot = useCallback(() => {
+    if (!connected || aiStateBusy) return
+    addMsg({ id: `user-${Date.now()}`, role: 'user', content: '📷 Analisando minha tela...', timestamp: new Date() })
+    sendScreenshot('Descreva o que você vê na minha tela. Seja específica e útil.')
+  }, [connected, aiStateBusy, addMsg, sendScreenshot])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -194,6 +223,23 @@ export function ChatMode({ sendMessage, onEvent, connected, aiStateBusy, onMessa
           onError={handleVoiceError}
           disabled={!connected || aiStateBusy}
         />
+        <button
+          onClick={handleScreenshot}
+          disabled={!connected || aiStateBusy}
+          title="Analisar tela (Fase 3 — Visão)"
+          style={{
+            width: 34, height: 34, borderRadius: 8, border: 'none',
+            background: 'var(--color-krirk-surface)',
+            color: connected && !aiStateBusy ? 'var(--color-krirk-text)' : 'var(--color-krirk-muted)',
+            cursor: connected && !aiStateBusy ? 'pointer' : 'not-allowed',
+            fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => { if (connected && !aiStateBusy) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(124,58,237,0.2)' }}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-krirk-surface)'}
+        >
+          📷
+        </button>
         <input
           ref={inputRef}
           value={input}

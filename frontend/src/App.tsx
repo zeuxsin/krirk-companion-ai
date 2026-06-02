@@ -26,7 +26,7 @@ async function openSettingsWindow() {
 }
 
 export default function App() {
-  const { connected, aiState, emotion, sendMessage, onEvent } = useWebSocket()
+  const { connected, aiState, emotion, sendMessage, sendScreenshot, onEvent } = useWebSocket()
   const [mode, setMode] = useState<AppMode>('chat')
   const [messageCount, setMessageCount] = useState(0)
 
@@ -104,6 +104,7 @@ export default function App() {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ChatMode
           sendMessage={sendMessage}
+          sendScreenshot={sendScreenshot}
           onEvent={onEvent}
           connected={connected}
           aiStateBusy={aiStateBusy}

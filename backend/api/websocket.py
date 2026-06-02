@@ -92,6 +92,11 @@ async def handle_websocket(
                     orchestrator.tts.set_voice(str(value))
                     await manager.send(client_id, {"type": "ack", "key": key, "value": value})
 
+            elif msg_type == "screenshot":
+                prompt = payload.get("prompt", "Descreva o que você vê na minha tela.")
+                async for event in orchestrator.process_screenshot(prompt, user_id=client_id):
+                    await manager.send(client_id, event)
+
             elif msg_type == "memory_stats":
                 stats = orchestrator.memory.get_stats(client_id)
                 await manager.send(client_id, {"type": "memory_stats", **stats})

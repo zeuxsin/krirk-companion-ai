@@ -38,6 +38,6 @@ scipy>=1.12.0
 # playwright>=1.45.0
 
 # Visão computacional (Fase 3)
-# mss>=9.0.0
-# pillow>=10.0.0
-# easyocr>=1.7.0
+mss>=9.0.0
+pillow>=10.0.0
+# easyocr>=1.7.0  # OCR separado — desnecessário com modelo de visão
