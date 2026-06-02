@@ -3,13 +3,15 @@ from dataclasses import dataclass
 
 
 EMOTION_KEYWORDS: dict[str, list[str]] = {
-    "happy": ["feliz", "ótimo", "maravilhoso", "incrível", "adorei", "que bom", "perfeito", "excelente", "sensacional"],
-    "excited": ["nossa", "uau", "wow", "incrível", "fantástico", "demais", "que legal", "adorável", "épico"],
-    "curious": ["interessante", "curioso", "me pergunto", "como funciona", "por quê", "fascinante", "estranho", "hm"],
-    "playful": ["haha", "rs", "brincadeira", "piada", "engraçado", "divertido", "que ridículo", "😄", "😂"],
+    "happy":     ["feliz", "ótimo", "maravilhoso", "incrível", "adorei", "que bom", "perfeito", "excelente", "sensacional"],
+    "excited":   ["nossa", "uau", "wow", "fantástico", "demais", "que legal", "adorável", "épico", "animado"],
+    "curious":   ["interessante", "curioso", "me pergunto", "como funciona", "por quê", "fascinante", "estranho", "hm"],
+    "playful":   ["haha", "rs", "brincadeira", "piada", "engraçado", "divertido", "que ridículo", "😄", "😂"],
     "concerned": ["preocupante", "cuidado", "atenção", "problema", "difícil", "complicado", "triste", "sinto muito"],
-    "thoughtful": ["bem", "na verdade", "pensando bem", "veja", "de fato", "considerando", "por outro lado"],
-    "neutral": [],
+    "thoughtful":["bem", "na verdade", "pensando bem", "veja", "de fato", "considerando", "por outro lado"],
+    "angry":     ["raiva", "irritado", "chateado", "frustrante", "que saco", "odeio", "absurdo", "inaceitável", "ridículo"],
+    "confused":  ["não entendi", "confuso", "como assim", "hã", "o quê", "tô perdido", "não faz sentido", "estranhíssimo"],
+    "neutral":   [],
 }
 
 

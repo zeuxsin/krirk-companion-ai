@@ -99,7 +99,7 @@ ollama:
 ## Roadmap (do SDD)
 
 - [x] **Fase 1** — MVP Conversacional (chat + TTS + memória + personalidade)
-- [ ] **Fase 2** — Companion AI (avatar Live2D + expressões + overlay)
+- [x] **Fase 2** — Companion AI (avatar flutuante + 9 emoções + animações CSS + draggable)
 - [ ] **Fase 3** — Multimodalidade (visão + OCR + leitura de tela)
 - [ ] **Fase 4** — Sistema Agente (controle do PC + automação + web)
 - [ ] **Fase 5** — Memória Avançada (vetorial + semântica)
@@ -112,3 +112,4 @@ ollama:
 - **Ollama**: deve estar rodando em `http://localhost:11434` antes de iniciar o backend.
 - **Dados do usuário**: `data/memory.db` não é versionado no git (dados pessoais).
 - **Voz (STT)**: usa Web Speech API do browser — requer **Chrome ou Edge**. Brave, Firefox e outros não suportam. A API também precisa de internet (envia áudio para o Google/Microsoft).
+- **Avatar**: imagens em `frontend/public/avatar/`. Coloque seus PNGs com os nomes: `neutro.png`, `animada.png`, `irritada.png`, `pensando.png`, `cansada.png`, `surpresa.png`, `confusa.png`, `curiosa.png`. SVGs placeholder existem como fallback.

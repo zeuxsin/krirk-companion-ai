@@ -2,9 +2,10 @@ import React from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { EmotionIndicator } from './components/EmotionIndicator'
 import { ChatWindow } from './components/ChatWindow'
+import { AvatarWidget } from './components/AvatarWidget'
 
 export default function App() {
-  const { connected, aiState, emotion, sendMessage, sendAudio, onEvent } = useWebSocket()
+  const { connected, aiState, emotion, sendMessage, onEvent } = useWebSocket()
 
   const aiStateBusy = aiState !== 'idle'
 
@@ -25,6 +26,11 @@ export default function App() {
         onEvent={onEvent}
         connected={connected}
         aiStateBusy={aiStateBusy}
+      />
+      {/* Avatar flutuante — sobreposto ao chat */}
+      <AvatarWidget
+        emotion={emotion}
+        aiState={aiState}
       />
     </div>
   )

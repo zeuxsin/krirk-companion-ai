@@ -6,6 +6,8 @@ export type EmotionType =
   | 'excited'
   | 'concerned'
   | 'playful'
+  | 'angry'
+  | 'confused'
 
 export type AIState = 'idle' | 'thinking' | 'speaking' | 'listening' | 'executing'
 

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 280" width="200" height="280">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%">
+      <stop offset="0%" stop-color="#db277733"/>
+      <stop offset="100%" stop-color="#db277711"/>
+    </radialGradient>
+  </defs>
+  <!-- Corpo/silhueta -->
+  <ellipse cx="100" cy="150" rx="70" ry="110" fill="url(#bg)" opacity="0.15"/>
+  <!-- Círculo do rosto -->
+  <circle cx="100" cy="110" r="70" fill="#db2777" opacity="0.2" stroke="#db2777" stroke-width="2"/>
+  <!-- Emoji -->
+  <text x="100" y="130" font-size="52" text-anchor="middle" dominant-baseline="middle">😵</text>
+  <!-- Label -->
+  <rect x="20" y="195" width="160" height="36" rx="18" fill="#db2777" opacity="0.8"/>
+  <text x="100" y="218" font-size="16" font-weight="bold" fill="white" text-anchor="middle" font-family="sans-serif">confusa</text>
+  <!-- Placeholder note -->
+  <text x="100" y="268" font-size="9" fill="#999" text-anchor="middle" font-family="sans-serif">placeholder — substitua pelo .png</text>
+</svg>

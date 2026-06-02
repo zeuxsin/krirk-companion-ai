@@ -2,13 +2,15 @@ import React from 'react'
 import { EmotionType, AIState } from '../types'
 
 const EMOTION_EMOJI: Record<EmotionType, string> = {
-  neutral: '😐',
-  happy: '😊',
-  curious: '🤔',
+  neutral:    '😐',
+  happy:      '😊',
+  curious:    '🤔',
   thoughtful: '💭',
-  excited: '🤩',
-  concerned: '😟',
-  playful: '😄',
+  excited:    '🤩',
+  concerned:  '😟',
+  playful:    '😄',
+  angry:      '😠',
+  confused:   '😵',
 }
 
 const STATE_LABEL: Record<AIState, string> = {
