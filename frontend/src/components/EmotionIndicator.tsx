@@ -1,5 +1,15 @@
-import React from 'react'
+import React, { useState, useCallback } from 'react'
 import { EmotionType, AIState } from '../types'
+
+// Invoca comando Tauri se estiver rodando como app desktop
+async function tauriSetAlwaysOnTop(value: boolean) {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('set_always_on_top', { value })
+  } catch {
+    // Não está rodando via Tauri (browser) — silencia
+  }
+}
 
 const EMOTION_EMOJI: Record<EmotionType, string> = {
   neutral:    '😐',
@@ -36,6 +46,14 @@ interface Props {
 }
 
 export function EmotionIndicator({ emotion, state, connected }: Props) {
+  const [pinned, setPinned] = useState(false)
+
+  const togglePin = useCallback(() => {
+    const next = !pinned
+    setPinned(next)
+    tauriSetAlwaysOnTop(next)
+  }, [pinned])
+
   return (
     <div style={{
       display: 'flex',
@@ -69,12 +87,29 @@ export function EmotionIndicator({ emotion, state, connected }: Props) {
         )}
         {STATE_LABEL[state]}
       </span>
+      {/* Botão sempre-no-topo (só visível quando rodando via Tauri) */}
+      <button
+        onClick={togglePin}
+        title={pinned ? 'Desafixar janela' : 'Fixar janela sempre no topo'}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: '14px',
+          opacity: pinned ? 1 : 0.4,
+          marginLeft: '4px',
+          padding: '0 2px',
+          color: pinned ? '#a78bfa' : '#a1a1aa',
+        }}
+      >
+        📌
+      </button>
       <span style={{
         width: 8,
         height: 8,
         borderRadius: '50%',
         background: connected ? '#22c55e' : '#ef4444',
-        marginLeft: '8px',
+        marginLeft: '4px',
       }} title={connected ? 'Conectado' : 'Desconectado'} />
       <style>{`
         @keyframes pulse {
