@@ -15,7 +15,15 @@ class Orchestrator:
         self._config = config
         self.personality = PersonalitySystem(config["personality"]["file"])
         self.state = AIState()
-        self.memory = MemoryManager(config["memory"]["db_path"])
+        self._vector_cfg = config.get("vector_memory", {
+            "enabled": True, "search_results": 5, "min_score": 0.45
+        })
+        self.memory = MemoryManager(
+            config["memory"]["db_path"],
+            chroma_path=self._vector_cfg.get("chroma_path", "data/chroma"),
+            ollama_base_url=self._ollama_config["base_url"],
+            ollama_model=self._vector_cfg.get("embed_model", "nomic-embed-text"),
+        )
         self.emotion = EmotionEngine(self.personality.get_initial_emotion())
         self.tts = TTSEngine(config["tts"])
         self.stt = STTEngine(config["stt"])
@@ -70,9 +78,19 @@ class Orchestrator:
         )
         facts = self.memory.get_facts(user_id, limit=8)
 
+        # Memórias semânticas relevantes — busca no histórico completo via ChromaDB
+        semantic_memories: list[str] = []
+        if self._vector_cfg.get("enabled", True):
+            raw = self.memory.search_semantic(
+                user_id, query=message, n=self._vector_cfg.get("search_results", 5)
+            )
+            min_score = self._vector_cfg.get("min_score", 0.45)
+            semantic_memories = [r["text"] for r in raw if r["score"] >= min_score]
+
         system_prompt = self.personality.build_system_prompt(
             current_emotion=self.emotion.current_emotion,
             user_facts=facts if facts else None,
+            semantic_memories=semantic_memories if semantic_memories else None,
         )
 
         messages = [{"role": "system", "content": system_prompt}]

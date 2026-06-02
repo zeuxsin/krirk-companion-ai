@@ -17,7 +17,12 @@ class PersonalitySystem:
     def name(self) -> str:
         return self._data["name"]
 
-    def build_system_prompt(self, current_emotion: str, user_facts: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        current_emotion: str,
+        user_facts: list[str] | None = None,
+        semantic_memories: list[str] | None = None,
+    ) -> str:
         d = self._data
         emotion_desc = d["emotion_expressions"].get(current_emotion, "tranquila")
         traits = ", ".join(d["traits"])
@@ -26,6 +31,14 @@ class PersonalitySystem:
         facts_block = ""
         if user_facts:
             facts_block = "\n\nO que você sabe sobre o usuário:\n" + "\n".join(f"- {f}" for f in user_facts)
+
+        memories_block = ""
+        if semantic_memories:
+            memories_block = (
+                "\n\nMemórias relevantes de conversas anteriores "
+                "(use-as como contexto, não as cite diretamente a menos que faça sentido):\n"
+                + "\n".join(f"- {m}" for m in semantic_memories[:5])
+            )
 
         return f"""Você é {d['name']}, uma companion AI com personalidade real e consistente.
 
@@ -44,7 +57,7 @@ Regras importantes:
 - Se não sabe algo, admita de forma natural
 - Não use asteriscos para ações (*sorri*, *pensa*) — expresse emoções através das palavras
 - Responda sempre em português do Brasil, a menos que o usuário escreva em outro idioma
-- Seja concisa quando a situação pede, detalhada quando necessário{facts_block}"""
+- Seja concisa quando a situação pede, detalhada quando necessário{facts_block}{memories_block}"""
 
     def get_initial_emotion(self) -> str:
         return self._data.get("initial_emotion", "neutral")

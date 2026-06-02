@@ -21,6 +21,13 @@ memory:
   db_path: "data/memory.db"
   auto_save_facts: true
 
+vector_memory:
+  enabled: true
+  chroma_path: "data/chroma"
+  embed_model: "nomic-embed-text"   # modelo Ollama dedicado para embeddings (já instalado)
+  search_results: 5                 # memórias semânticas recuperadas por query
+  min_score: 0.45                   # similaridade mínima coseno (0-1) para incluir no contexto
+
 server:
   host: "localhost"
   port: 8000

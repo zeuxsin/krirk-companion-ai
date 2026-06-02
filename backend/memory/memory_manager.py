@@ -1,4 +1,5 @@
 import sqlite3
+import uuid
 import json
 from datetime import datetime
 from pathlib import Path
@@ -6,10 +7,28 @@ from typing import Optional
 
 
 class MemoryManager:
-    def __init__(self, db_path: str = "data/memory.db"):
+    def __init__(
+        self,
+        db_path: str = "data/memory.db",
+        chroma_path: str = "data/chroma",
+        ollama_base_url: str = "http://localhost:11434",
+        ollama_model: str = "nomic-embed-text",
+    ):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db_path = db_path
         self._init_db()
+
+        # Busca semântica via ChromaDB — degradação graciosa se não disponível
+        try:
+            from backend.memory.vector_store import VectorStore
+            self._vectors: Optional[object] = VectorStore(
+                persist_path=chroma_path,
+                ollama_base_url=ollama_base_url,
+                ollama_model=ollama_model,
+            )
+        except Exception as e:
+            print(f"[KRIRK] ChromaDB indisponível, usando só SQLite: {e}")
+            self._vectors = None
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -68,6 +87,16 @@ class MemoryManager:
                 (user_id, now, now)
             )
 
+        # Indexa no ChromaDB para busca semântica
+        if self._vectors:
+            doc_id = f"msg-{user_id}-{uuid.uuid4().hex[:12]}"
+            self._vectors.add(doc_id, content, {
+                "user_id": user_id,
+                "type": "message",
+                "role": role,
+                "emotion": emotion,
+            })
+
     def get_recent_messages(self, user_id: str, limit: int = 20) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -87,6 +116,15 @@ class MemoryManager:
                 (user_id, fact, category, now, now)
             )
 
+        # Indexa no ChromaDB
+        if self._vectors:
+            doc_id = f"fact-{user_id}-{uuid.uuid4().hex[:12]}"
+            self._vectors.add(doc_id, fact, {
+                "user_id": user_id,
+                "type": "fact",
+                "category": category,
+            })
+
     def get_facts(self, user_id: str, limit: int = 10) -> list[str]:
         with self._conn() as conn:
             rows = conn.execute(
@@ -94,6 +132,12 @@ class MemoryManager:
                 (user_id, limit)
             ).fetchall()
         return [r["fact"] for r in rows]
+
+    def search_semantic(self, user_id: str, query: str, n: int = 5) -> list[dict]:
+        """Busca semântica nas memórias do usuário. Retorna [] se ChromaDB indisponível."""
+        if not self._vectors:
+            return []
+        return self._vectors.search(query, user_id, n=n)
 
     def get_profile(self, user_id: str) -> Optional[dict]:
         with self._conn() as conn:
@@ -119,9 +163,11 @@ class MemoryManager:
     def get_stats(self, user_id: str) -> dict:
         profile = self.get_profile(user_id)
         facts_count = len(self.get_facts(user_id, limit=1000))
+        vector_count = self._vectors.count() if self._vectors else 0
         return {
             "total_messages": profile["total_messages"] if profile else 0,
             "facts_stored": facts_count,
             "intimacy_level": profile["intimacy_level"] if profile else 0.0,
             "first_seen": profile["first_seen"] if profile else None,
+            "semantic_memories": vector_count,
         }
