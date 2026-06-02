@@ -1,0 +1,196 @@
+import React from 'react'
+import { EmotionType, AIState } from '../types'
+
+export type AppMode = 'chat' | 'hud' | 'avatar' | 'settings'
+
+const EMOTION_COLOR: Record<EmotionType, string> = {
+  neutral:    '#71717a',
+  happy:      '#a78bfa',
+  excited:    '#f59e0b',
+  thoughtful: '#60a5fa',
+  curious:    '#34d399',
+  concerned:  '#f87171',
+  playful:    '#fb923c',
+  angry:      '#ef4444',
+  confused:   '#c084fc',
+}
+
+const MODE_ITEMS: { id: AppMode; label: string; icon: string }[] = [
+  { id: 'chat',     label: 'Chat',          icon: '💬' },
+  { id: 'hud',      label: 'HUD',           icon: '🪟' },
+  { id: 'avatar',   label: 'Avatar',        icon: '✨' },
+  { id: 'settings', label: 'Configurações', icon: '⚙️' },
+]
+
+interface Props {
+  mode: AppMode
+  setMode: (m: AppMode) => void
+  emotion: EmotionType
+  aiState: AIState
+  connected: boolean
+  messageCount: number
+  onOpenSettings: () => void
+}
+
+export function Sidebar({
+  mode, setMode, emotion, aiState, connected, messageCount, onOpenSettings,
+}: Props) {
+  const stateLabel: Record<AIState, string> = {
+    idle:      'em espera',
+    thinking:  'pensando...',
+    speaking:  'respondendo',
+    listening: 'ouvindo',
+    executing: 'executando',
+  }
+
+  return (
+    <aside style={{
+      width: 130,
+      minWidth: 130,
+      background: 'var(--color-krirk-sidebar)',
+      borderRight: '1px solid var(--color-krirk-border)',
+      display: 'flex',
+      flexDirection: 'column',
+      padding: '16px 10px',
+      gap: 0,
+      flexShrink: 0,
+    }}>
+      {/* Logo */}
+      <div style={{
+        fontSize: 22,
+        fontWeight: 800,
+        letterSpacing: '0.12em',
+        background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        marginBottom: 20,
+        paddingLeft: 4,
+      }}>
+        KRIRK
+      </div>
+
+      {/* Status */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          color: 'var(--color-krirk-muted)',
+          textTransform: 'uppercase',
+          marginBottom: 6,
+          paddingLeft: 4,
+        }}>
+          Status
+        </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingLeft: 4,
+        }}>
+          <span style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: EMOTION_COLOR[emotion],
+            flexShrink: 0,
+            boxShadow: `0 0 6px ${EMOTION_COLOR[emotion]}`,
+          }} />
+          <span style={{ fontSize: 11, color: 'var(--color-krirk-text)', fontWeight: 500 }}>
+            {emotion}
+          </span>
+        </div>
+        <div style={{
+          paddingLeft: 4,
+          marginTop: 3,
+          fontSize: 9,
+          color: 'var(--color-krirk-muted)',
+        }}>
+          {stateLabel[aiState]}
+        </div>
+      </div>
+
+      <div style={{
+        height: 1,
+        background: 'var(--color-krirk-border)',
+        margin: '4px 0 12px',
+      }} />
+
+      {/* Modos */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          color: 'var(--color-krirk-muted)',
+          textTransform: 'uppercase',
+          marginBottom: 6,
+          paddingLeft: 4,
+        }}>
+          Modo
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {MODE_ITEMS.map(({ id, label, icon }) => {
+            const isActive = mode === id && id !== 'settings'
+            return (
+              <button
+                key={id}
+                onClick={() => id === 'settings' ? onOpenSettings() : setMode(id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '7px 8px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: isActive ? 'var(--color-krirk-accent)' : 'transparent',
+                  color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(124,58,237,0.15)'
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+                }}
+              >
+                <span style={{ fontSize: 13 }}>{icon}</span>
+                <span>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* Rodapé */}
+      <div style={{
+        borderTop: '1px solid var(--color-krirk-border)',
+        paddingTop: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+      }}>
+        <div style={{ fontSize: 9, color: 'var(--color-krirk-muted)' }}>
+          {messageCount} {messageCount === 1 ? 'mensagem' : 'mensagens'}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: connected ? 'var(--color-krirk-online)' : 'var(--color-krirk-offline)',
+          }} />
+          <span style={{ fontSize: 9, color: 'var(--color-krirk-muted)' }}>
+            {connected ? 'online' : 'offline'}
+          </span>
+        </div>
+      </div>
+    </aside>
+  )
+}

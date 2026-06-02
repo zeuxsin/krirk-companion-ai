@@ -13,16 +13,33 @@
     "windows": [
       {
         "label": "main",
-        "title": "KRIRK — Companion AI",
-        "width": 940,
-        "height": 700,
+        "title": "KRIRK",
+        "url": "/",
+        "width": 560,
+        "height": 420,
         "minWidth": 420,
-        "minHeight": 500,
+        "minHeight": 320,
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
         "alwaysOnTop": false,
         "skipTaskbar": false,
+        "center": true
+      },
+      {
+        "label": "settings",
+        "title": "KRIRK — Configurações",
+        "url": "/?window=settings",
+        "width": 420,
+        "height": 340,
+        "minWidth": 380,
+        "minHeight": 300,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "visible": false,
         "center": true
       }
     ],

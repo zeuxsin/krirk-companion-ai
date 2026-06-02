@@ -37,6 +37,20 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok", **orchestrator.get_status()}
 
+    @app.get("/api/system")
+    async def system_stats():
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            return {
+                "cpu": psutil.cpu_percent(interval=0.1),
+                "ram_used": round(mem.used / 1e9, 2),
+                "ram_total": round(mem.total / 1e9, 2),
+                "ram_percent": mem.percent,
+            }
+        except ImportError:
+            return {"cpu": 0, "ram_used": 0, "ram_total": 0, "ram_percent": 0}
+
     @app.get("/api/personality")
     async def get_personality():
         return {
