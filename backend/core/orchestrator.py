@@ -13,6 +13,7 @@ from backend.voice.stt import STTEngine
 class Orchestrator:
     def __init__(self, config: dict):
         self._config = config
+        self._ollama_config = config["ollama"]
         self.personality = PersonalitySystem(config["personality"]["file"])
         self.state = AIState()
         self._vector_cfg = config.get("vector_memory", {
@@ -27,7 +28,6 @@ class Orchestrator:
         self.emotion = EmotionEngine(self.personality.get_initial_emotion())
         self.tts = TTSEngine(config["tts"])
         self.stt = STTEngine(config["stt"])
-        self._ollama_config = config["ollama"]
 
     async def _stream_ollama(
         self,
