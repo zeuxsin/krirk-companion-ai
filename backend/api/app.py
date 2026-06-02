@@ -1,9 +1,7 @@
 import yaml
-import uuid
 from pathlib import Path
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from backend.core.orchestrator import Orchestrator
 from backend.api.websocket import handle_websocket
@@ -66,9 +64,25 @@ def create_app() -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket, client_id: str):
         await handle_websocket(websocket, client_id, orchestrator)
 
+    @app.get("/api/settings")
+    async def get_settings():
+        return {
+            "tts_enabled": orchestrator.tts._enabled,
+            "tts_voice":   orchestrator.tts._voice,
+        }
+
+    @app.post("/api/settings")
+    async def update_settings(request: Request):
+        body = await request.json()
+        if "tts_enabled" in body:
+            orchestrator.tts.set_enabled(bool(body["tts_enabled"]))
+        if "tts_voice" in body:
+            orchestrator.tts.set_voice(str(body["tts_voice"]))
+        return {"ok": True}
+
     @app.websocket("/ws")
     async def websocket_anon(websocket: WebSocket):
-        client_id = str(uuid.uuid4())[:8]
-        await handle_websocket(websocket, client_id, orchestrator)
+        # ID fixo "default" — app single-user, garante que memórias persistem entre sessões
+        await handle_websocket(websocket, "default", orchestrator)
 
     return app

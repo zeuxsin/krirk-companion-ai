@@ -1,7 +1,38 @@
 import asyncio
 import base64
 import io
+import re
 from typing import Optional
+
+
+def clean_for_tts(text: str) -> str:
+    """
+    Remove elementos que não devem ser lidos em voz alta:
+    emojis, asteriscos/markdown, URLs, etc.
+    """
+    # Remove texto entre asteriscos (ex: *sorri*, **negrito**)
+    text = re.sub(r'\*+[^*]*\*+', '', text)
+    # Remove texto entre underscores (_italic_)
+    text = re.sub(r'_[^_]*_', '', text)
+    # Remove URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Remove emojis e símbolos Unicode fora do range de texto normal
+    text = re.sub(
+        r'[\U00010000-\U0010ffff'   # emojis / supplementary planes
+        r'\U0001F300-\U0001F9FF'    # misc symbols & pictographs (já coberto acima)
+        r'☀-➿'            # misc symbols (☀ ✓ etc.)
+        r'⌀-⏿'            # misc technical
+        r'︀-️'            # variation selectors
+        r'‍'                   # zero-width joiner
+        r']',
+        '', text, flags=re.UNICODE
+    )
+    # Remove caracteres de formatação (hashes de markdown, backticks)
+    text = re.sub(r'[`#]', '', text)
+    # Colapsa espaços múltiplos e linhas em branco
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'  +', ' ', text)
+    return text.strip()
 
 
 class TTSEngine:
@@ -16,7 +47,7 @@ class TTSEngine:
         """Returns base64-encoded MP3 audio, or None if TTS is disabled/failed."""
         if not self._enabled:
             return None
-        cleaned = text.strip()
+        cleaned = clean_for_tts(text)
         if not cleaned:
             return None
         try:

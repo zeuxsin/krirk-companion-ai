@@ -92,15 +92,62 @@ function HardwareTab() {
   )
 }
 
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 40, height: 22, borderRadius: 11, cursor: 'pointer', flexShrink: 0,
+        background: checked ? 'var(--color-krirk-accent)' : 'rgba(255,255,255,0.12)',
+        position: 'relative', transition: 'background 0.2s',
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: 3, width: 16, height: 16, borderRadius: '50%',
+        background: '#fff', transition: 'left 0.2s',
+        left: checked ? 21 : 3,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+      }} />
+    </div>
+  )
+}
+
 function ModelsTab() {
   const [model, setModel] = useState('gemma3:4b')
   const [temp, setTemp] = useState('0.85')
+  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [ttsStatus, setTtsStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  // Busca estado atual do TTS ao montar
+  useEffect(() => {
+    fetch('http://localhost:8000/api/settings')
+      .then(r => r.json())
+      .then(d => setTtsEnabled(d.tts_enabled ?? true))
+      .catch(() => {})
+  }, [])
+
+  const handleTtsToggle = async (value: boolean) => {
+    setTtsEnabled(value)
+    setTtsStatus('saving')
+    try {
+      await fetch('http://localhost:8000/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tts_enabled: value }),
+      })
+      setTtsStatus('saved')
+      setTimeout(() => setTtsStatus('idle'), 1500)
+    } catch {
+      setTtsStatus('idle')
+    }
+  }
 
   return (
     <div>
       <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, color: 'var(--color-krirk-text)' }}>
         Modelos
       </h3>
+
       <label style={{ display: 'block', marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: 'var(--color-krirk-muted)', display: 'block', marginBottom: 4 }}>
           Modelo Ollama
@@ -116,7 +163,8 @@ function ModelsTab() {
           }}
         />
       </label>
-      <label style={{ display: 'block' }}>
+
+      <label style={{ display: 'block', marginBottom: 20 }}>
         <span style={{ fontSize: 11, color: 'var(--color-krirk-muted)', display: 'block', marginBottom: 4 }}>
           Temperatura ({temp})
         </span>
@@ -126,6 +174,30 @@ function ModelsTab() {
           style={{ width: '100%' }}
         />
       </label>
+
+      {/* TTS Toggle */}
+      <div style={{
+        borderTop: '1px solid var(--color-krirk-border)',
+        paddingTop: 16,
+      }}>
+        <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: 'var(--color-krirk-text)' }}>
+          Voz (TTS)
+        </h4>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--color-krirk-text)' }}>Fala em voz alta</div>
+            <div style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginTop: 2 }}>
+              {ttsEnabled ? 'Ativado — KRIRK lê as respostas' : 'Desativado — apenas texto'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {ttsStatus === 'saved' && (
+              <span style={{ fontSize: 10, color: 'var(--color-krirk-online)' }}>salvo</span>
+            )}
+            <Toggle checked={ttsEnabled} onChange={handleTtsToggle} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
