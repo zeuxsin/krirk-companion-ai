@@ -4,7 +4,17 @@ Sistema de personalidade da KRIRK — monta o system prompt dinâmico.
 Baseado na versão Krirk 1.0, com melhorias de formato e caminhos do sistema.
 """
 import json
+from datetime import datetime
 from pathlib import Path
+
+_DAYS_PT = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+            "sexta-feira", "sábado", "domingo"]
+
+def _now_pt() -> str:
+    """Retorna data/hora atual formatada em PT-BR."""
+    n = datetime.now()
+    day = _DAYS_PT[n.weekday()]
+    return f"{day}, {n.day:02d}/{n.month:02d}/{n.year}, {n.hour:02d}:{n.minute:02d}"
 
 # Caminhos reais do sistema — injetados no prompt para evitar que o modelo invente usernames
 _HOME    = str(Path.home()).replace("\\", "/")
@@ -64,7 +74,9 @@ CAMINHOS DO SISTEMA — use EXATAMENTE estes, NUNCA invente o username:
 - Home: {_HOME}
 - Desktop: {_DESKTOP}
 
-Você NÃO está em sandbox. Você roda no computador real do usuário."""
+Você NÃO está em sandbox. Você roda no computador real do usuário.
+
+DATA E HORA ATUAL: {_now_pt()}"""
 
         parts = [base]
 

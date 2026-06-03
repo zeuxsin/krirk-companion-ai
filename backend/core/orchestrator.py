@@ -1,6 +1,18 @@
 import asyncio
 import json
+import re
 from typing import AsyncGenerator
+
+# Tags de raciocínio interno que alguns modelos (gemma3, qwen) incluem na resposta
+_REASONING_RE = re.compile(
+    r'<(thought|thinking|think|scratchpad|reflection)>.*?</\1>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+def _strip_reasoning(text: str) -> str:
+    """Remove blocos de raciocínio interno do texto antes de exibir ao usuário."""
+    cleaned = _REASONING_RE.sub('', text)
+    return re.sub(r'\n{3,}', '\n\n', cleaned).strip()
 
 from backend.core.personality import PersonalitySystem
 from backend.core.state import AIState, AISystemState
@@ -107,17 +119,20 @@ class Orchestrator:
             full_response += token
             yield {"type": "token", "content": token}
 
-        new_emotion = self.emotion.analyze_and_update(full_response)
-        self.memory.save_message(user_id, "assistant", full_response, emotion=new_emotion)
+        # Remove blocos de raciocínio interno antes de salvar e reproduzir
+        clean_response = _strip_reasoning(full_response)
+
+        new_emotion = self.emotion.analyze_and_update(clean_response)
+        self.memory.save_message(user_id, "assistant", clean_response, emotion=new_emotion)
         self.memory.update_intimacy(user_id, 0.1)
 
-        audio_b64 = await self.tts.generate(full_response)
+        audio_b64 = await self.tts.generate(clean_response)
 
         self.state.set(AISystemState.IDLE)
 
         yield {
             "type": "response_complete",
-            "content": full_response,
+            "content": clean_response,   # versão limpa substitui o streaming no frontend
             "emotion": new_emotion,
             "audio": audio_b64,
         }
@@ -201,6 +216,42 @@ class Orchestrator:
             "audio": audio_b64,
         }
         yield {"type": "status", "state": "idle"}
+
+    async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
+        """
+        Tarefa de background: usa o LLM para extrair fatos sobre o usuário
+        a partir do último par de mensagens e salva automaticamente na memória.
+        Executado de forma assíncrona — nunca bloqueia a resposta principal.
+        """
+        prompt = (
+            "Analise esta conversa e extraia fatos concretos e permanentes sobre o USUÁRIO "
+            "(não sobre a IA). Retorne APENAS um JSON com lista de fatos objetivos. "
+            "Se não houver fatos relevantes, retorne {\"fatos\": []}.\n"
+            "Exemplos de fatos bons: nome, profissão, cidade, hobby, preferência clara.\n"
+            "NÃO inclua suposições nem fatos sobre a conversa em si.\n\n"
+            f"Usuário: {user_msg}\n"
+            f"Assistente: {assistant_msg}\n\n"
+            "JSON:"
+        )
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            raw = ""
+            async for token in self._stream_ollama(messages):
+                raw += token
+                if len(raw) > 1000:  # limite de segurança
+                    break
+
+            match = re.search(r'\{.*?\}', raw, re.DOTALL)
+            if not match:
+                return
+            data = json.loads(match.group())
+            for fact in data.get("fatos", []):
+                fact = fact.strip()
+                if fact and len(fact) > 8:
+                    self.memory.save_fact(user_id, fact)
+                    print(f"[KRIRK] Fato extraído: {fact}")
+        except Exception as e:
+            print(f"[KRIRK] extract_facts_bg falhou: {e}")
 
     def get_status(self) -> dict:
         return {

@@ -71,8 +71,16 @@ async def handle_websocket(
                 content = payload.get("content", "").strip()
                 if not content:
                     continue
+                last_response = ""
                 async for event in orchestrator.process_text(content, user_id=client_id):
                     await manager.send(client_id, event)
+                    if event.get("type") == "response_complete":
+                        last_response = event.get("content", "")
+                # Extrai fatos em background — sem bloquear próximas mensagens
+                if last_response:
+                    asyncio.create_task(
+                        orchestrator.extract_facts_bg(content, last_response, client_id)
+                    )
 
             elif msg_type == "audio":
                 audio_data = payload.get("data", "")

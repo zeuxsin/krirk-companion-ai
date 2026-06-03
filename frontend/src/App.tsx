@@ -95,8 +95,14 @@ export default function App() {
       }
       if (ev.type === 'response_complete') {
         if (streamingIdRef.current) {
-          finalizeMsg(streamingIdRef.current, ev.emotion)
+          const id = streamingIdRef.current
           streamingIdRef.current = null
+          // Substitui conteúdo streamado pela versão limpa (sem reasoning tags)
+          setMessages(p => p.map(m =>
+            m.id === id
+              ? { ...m, content: ev.content ?? m.content, isStreaming: false, emotion: ev.emotion as never }
+              : m
+          ))
         }
         if (ev.audio) playAudioBase64(ev.audio)
         return
