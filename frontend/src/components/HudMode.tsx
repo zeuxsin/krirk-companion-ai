@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { EmotionType, AIState, Message, WSEvent } from '../types'
+import { EmotionType, AIState, Message } from '../types'
 import { VoiceButton } from './VoiceButton'
 
 const EMOTION_TO_IMG: Record<EmotionType, string> = {
@@ -23,22 +23,20 @@ const ANIM_BY_STATE: Record<AIState, string> = {
 }
 
 interface Props {
+  messages: Message[]
+  addMsg: (msg: Message) => void
   emotion: EmotionType
   aiState: AIState
   connected: boolean
   aiStateBusy: boolean
   sendMessage: (text: string) => void
-  onEvent: (handler: (e: WSEvent) => void) => () => void
 }
 
-export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage, onEvent }: Props) {
+export function HudMode({ messages, addMsg, emotion, aiState, connected, aiStateBusy, sendMessage }: Props) {
   const [imgSrc, setImgSrc] = useState(`/avatar/${EMOTION_TO_IMG[emotion]}.png`)
   const [imgOpacity, setImgOpacity] = useState(1)
-  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
   const prevEmotion = useRef(emotion)
-  const streamingIdRef = useRef<string | null>(null)
 
   // Fade na troca de emoção
   useEffect(() => {
@@ -56,39 +54,6 @@ export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage,
     setImgSrc(src => src.endsWith('.png') ? `/avatar/${EMOTION_TO_IMG[emotion]}.svg` : src)
   }, [emotion])
 
-  const addMsg = useCallback((msg: Message) => {
-    setMessages(p => [...p.slice(-20), msg])
-  }, [])
-
-  useEffect(() => {
-    const unsub = onEvent((ev: WSEvent) => {
-      if (ev.type === 'connected' && ev.message) {
-        addMsg({ id: `ai-${Date.now()}`, role: 'assistant', content: ev.message, timestamp: new Date() })
-      }
-      if (ev.type === 'token' && ev.content) {
-        if (!streamingIdRef.current) {
-          const id = `ai-${Date.now()}`
-          streamingIdRef.current = id
-          addMsg({ id, role: 'assistant', content: ev.content, timestamp: new Date(), isStreaming: true })
-        } else {
-          setMessages(p => p.map(m => m.id === streamingIdRef.current
-            ? { ...m, content: m.content + ev.content } : m))
-        }
-      }
-      if (ev.type === 'response_complete') {
-        if (streamingIdRef.current) {
-          setMessages(p => p.map(m => m.id === streamingIdRef.current
-            ? { ...m, isStreaming: false } : m))
-          streamingIdRef.current = null
-        }
-      }
-      if (ev.type === 'error' && ev.message) {
-        addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: `⚠️ ${ev.message}`, timestamp: new Date() })
-      }
-    })
-    return unsub
-  }, [onEvent, addMsg])
-
   const submit = useCallback(() => {
     const text = input.trim()
     if (!text || !connected || aiStateBusy) return
@@ -102,6 +67,7 @@ export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage,
     sendMessage(text)
   }, [addMsg, sendMessage])
 
+  // Mostra só as últimas 4 mensagens no modo compacto
   const lastMsgs = messages.slice(-4)
 
   return (
@@ -140,7 +106,7 @@ export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage,
         </div>
       </div>
 
-      {/* Mensagens compactas */}
+      {/* Últimas 4 mensagens */}
       <div style={{
         flex: 1, overflowY: 'auto', padding: '8px 10px',
         display: 'flex', flexDirection: 'column', gap: 6,
@@ -167,7 +133,7 @@ export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage,
               color: 'var(--color-krirk-text)',
               lineHeight: 1.5,
             }}>
-              {m.content}
+              {m.content || (m.thumbnail ? '[screenshot]' : '')}
               {m.isStreaming && (
                 <span style={{
                   display: 'inline-block', width: 5, height: 10,
@@ -189,7 +155,6 @@ export function HudMode({ emotion, aiState, connected, aiStateBusy, sendMessage,
       }}>
         <VoiceButton onTranscript={handleTranscript} disabled={!connected || aiStateBusy} />
         <input
-          ref={inputRef}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), submit())}

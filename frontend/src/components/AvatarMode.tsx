@@ -56,7 +56,7 @@ export function AvatarMode({ emotion, aiState, onEvent }: Props) {
         setLastMessages(prev => [...prev.slice(-2), {
           id: `ai-${Date.now()}`,
           role: 'assistant',
-          content: ev.content,
+          content: ev.content ?? '',
           timestamp: new Date(),
         }])
       }

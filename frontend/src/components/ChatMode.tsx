@@ -1,21 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Message, WSEvent } from '../types'
+import { Message } from '../types'
 import { VoiceButton } from './VoiceButton'
-
-// ─── Audio ───────────────────────────────────────────────────────────────────
-async function playAudioBase64(b64: string) {
-  try {
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-    const ctx = new AudioContext()
-    if (ctx.state === 'suspended') await ctx.resume()
-    const buffer = await ctx.decodeAudioData(bytes.buffer)
-    const src = ctx.createBufferSource()
-    src.buffer = buffer
-    src.connect(ctx.destination)
-    src.start(0)
-    src.onended = () => ctx.close()
-  } catch (e) { console.warn('[TTS]', e) }
-}
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 function Bubble({ msg }: { msg: Message }) {
@@ -76,81 +61,21 @@ function Bubble({ msg }: { msg: Message }) {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface Props {
+  messages: Message[]
+  addMsg: (msg: Message) => void
   sendMessage: (text: string) => void
   sendScreenshot: (prompt: string) => void
-  onEvent: (handler: (e: WSEvent) => void) => () => void
   connected: boolean
   aiStateBusy: boolean
-  onMessageCountChange?: (n: number) => void
 }
 
 // ─── ChatMode ─────────────────────────────────────────────────────────────────
-export function ChatMode({ sendMessage, sendScreenshot, onEvent, connected, aiStateBusy, onMessageCountChange }: Props) {
-  const [messages, setMessages] = useState<Message[]>([])
+export function ChatMode({ messages, addMsg, sendMessage, sendScreenshot, connected, aiStateBusy }: Props) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const streamingIdRef = useRef<string | null>(null)
 
-  const addMsg = useCallback((msg: Message) => {
-    setMessages(p => {
-      const next = [...p, msg]
-      onMessageCountChange?.(next.length)
-      return next
-    })
-  }, [onMessageCountChange])
-
-  const appendToken = useCallback((id: string, token: string) => {
-    setMessages(p => p.map(m => m.id === id ? { ...m, content: m.content + token } : m))
-  }, [])
-
-  const finalizeMsg = useCallback((id: string, emotion?: string) => {
-    setMessages(p => p.map(m => m.id === id ? { ...m, isStreaming: false, emotion: emotion as never } : m))
-  }, [])
-
-  useEffect(() => {
-    const unsub = onEvent((ev: WSEvent) => {
-      if (ev.type === 'connected' && ev.message) {
-        addMsg({ id: `ai-${Date.now()}`, role: 'assistant', content: ev.message, timestamp: new Date() })
-        return
-      }
-      if (ev.type === 'transcription' && ev.content) {
-        addMsg({ id: `user-${Date.now()}`, role: 'user', content: ev.content, timestamp: new Date() })
-        return
-      }
-      if (ev.type === 'token' && ev.content) {
-        if (!streamingIdRef.current) {
-          const id = `ai-${Date.now()}`
-          streamingIdRef.current = id
-          addMsg({ id, role: 'assistant', content: ev.content, timestamp: new Date(), isStreaming: true })
-        } else {
-          appendToken(streamingIdRef.current, ev.content)
-        }
-        return
-      }
-      if (ev.type === 'response_complete') {
-        if (streamingIdRef.current) { finalizeMsg(streamingIdRef.current, ev.emotion); streamingIdRef.current = null }
-        if (ev.audio) playAudioBase64(ev.audio)
-        return
-      }
-      if (ev.type === 'screenshot_taken' && ev.thumbnail) {
-        addMsg({
-          id: `screenshot-${Date.now()}`,
-          role: 'assistant',
-          content: '',
-          thumbnail: `data:image/jpeg;base64,${ev.thumbnail}`,
-          timestamp: new Date(),
-        })
-        return
-      }
-      if (ev.type === 'error' && ev.message) {
-        if (streamingIdRef.current) { finalizeMsg(streamingIdRef.current); streamingIdRef.current = null }
-        addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: `⚠️ ${ev.message}`, timestamp: new Date() })
-      }
-    })
-    return unsub
-  }, [onEvent, addMsg, appendToken, finalizeMsg])
-
+  // Scroll para o fim a cada nova mensagem
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -226,7 +151,7 @@ export function ChatMode({ sendMessage, sendScreenshot, onEvent, connected, aiSt
         <button
           onClick={handleScreenshot}
           disabled={!connected || aiStateBusy}
-          title="Analisar tela (Fase 3 — Visão)"
+          title="Analisar tela"
           style={{
             width: 34, height: 34, borderRadius: 8, border: 'none',
             background: 'var(--color-krirk-surface)',
