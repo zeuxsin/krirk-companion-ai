@@ -29,6 +29,7 @@ export interface WSEvent {
   message?: string
   audio?: string
   thumbnail?: string  // base64 JPEG (evento screenshot_taken)
+  history?: { role: string; content: string }[]  // histórico de mensagens ao conectar
   status?: {
     state: AIState
     emotion: EmotionType

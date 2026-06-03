@@ -44,9 +44,14 @@ async def handle_websocket(
 ):
     await manager.connect(websocket, client_id)
 
+    # Carrega histórico recente do usuário e envia ao frontend
+    history = orchestrator.memory.get_recent_messages(
+        client_id,
+        limit=orchestrator._config["memory"]["short_term_limit"],
+    )
     await manager.send(client_id, {
         "type": "connected",
-        "message": f"Olá! Sou a {orchestrator.personality.name}. Como você está?",
+        "history": history,   # [{role, content}, ...] — vazio na primeira vez
         "status": orchestrator.get_status(),
     })
 

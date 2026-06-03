@@ -66,8 +66,17 @@ export default function App() {
   // Única subscrição de eventos WS — centralizada aqui
   useEffect(() => {
     const unsub = onEvent((ev: WSEvent) => {
-      if (ev.type === 'connected' && ev.message) {
-        addMsg({ id: `ai-${Date.now()}`, role: 'assistant', content: ev.message, timestamp: new Date() })
+      if (ev.type === 'connected') {
+        if (ev.history && ev.history.length > 0) {
+          // Restaura conversa anterior
+          setMessages(ev.history.map((m, i) => ({
+            id: `history-${i}`,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: new Date(),
+          })))
+        }
+        // Sem mensagem de saudação — histórico fala por si
         return
       }
       if (ev.type === 'transcription' && ev.content) {
