@@ -76,10 +76,13 @@ async def handle_websocket(
                     await manager.send(client_id, event)
                     if event.get("type") == "response_complete":
                         last_response = event.get("content", "")
-                # Extrai fatos em background — sem bloquear próximas mensagens
+                # Tarefas de background — não bloqueiam próximas mensagens
                 if last_response:
                     asyncio.create_task(
                         orchestrator.extract_facts_bg(content, last_response, client_id)
+                    )
+                    asyncio.create_task(
+                        orchestrator.update_profile_bg(content, last_response, client_id)
                     )
 
             elif msg_type == "audio":

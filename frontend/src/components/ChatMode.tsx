@@ -2,8 +2,63 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Message } from '../types'
 import { VoiceButton } from './VoiceButton'
 
+// ─── ToolChip ─────────────────────────────────────────────────────────────────
+function ToolChip({ msg }: { msg: Message }) {
+  const [expanded, setExpanded] = React.useState(false)
+  return (
+    <div className="anim-fadein" style={{
+      display: 'flex', justifyContent: 'center', marginBottom: 8,
+    }}>
+      <div style={{
+        background: 'rgba(124,58,237,0.12)',
+        border: '1px solid rgba(124,58,237,0.3)',
+        borderRadius: 20,
+        padding: '4px 12px',
+        fontSize: 12,
+        color: 'var(--color-krirk-muted)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        maxWidth: '80%',
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {msg.isRunning ? (
+            <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⚙</span>
+          ) : '✓'}
+          {msg.isRunning
+            ? `Executando: ${msg.toolName}...`
+            : msg.toolName}
+          {!msg.isRunning && msg.toolResult && (
+            <button
+              onClick={() => setExpanded(e => !e)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--color-krirk-muted)', fontSize: 11, padding: '0 4px',
+              }}
+            >
+              {expanded ? '▲ fechar' : '▼ ver resultado'}
+            </button>
+          )}
+        </span>
+        {expanded && msg.toolResult && (
+          <pre style={{
+            margin: 0, padding: '6px 10px',
+            background: 'rgba(0,0,0,0.3)', borderRadius: 6,
+            fontSize: 11, color: 'var(--color-krirk-text)',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            maxHeight: 200, overflowY: 'auto',
+            width: '100%',
+          }}>
+            {msg.toolResult}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 function Bubble({ msg }: { msg: Message }) {
+  if (msg.role === 'tool') return <ToolChip msg={msg} />
+
   const isUser = msg.role === 'user'
   return (
     <div className="anim-fadein" style={{

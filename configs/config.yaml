@@ -41,3 +41,21 @@ personality:
 logging:
   level: "INFO"
   file: "logs/krirk.log"
+
+tools:
+  enabled: true
+  tool_model: "qwen2.5-coder:7b"   # modelo especializado para roteamento de ferramentas
+  max_rounds: 4
+  timeout_seconds: 10
+  whitelist:
+    - get_time
+    - run_powershell
+    - get_clipboard
+    - set_clipboard
+    - get_active_window
+    - open_file
+    - get_system_info
+    - read_file
+    - list_directory
+    - search_files
+    # write_file — omitido intencionalmente (potencialmente destrutivo)

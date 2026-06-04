@@ -27,6 +27,10 @@ def clean_for_tts(text: str) -> str:
         r']',
         '', text, flags=re.UNICODE
     )
+    # Remove tags de tool_call (não devem ser lidas em voz alta)
+    text = re.sub(r'<tool_call>.*?</tool_call>', '', text, flags=re.DOTALL)
+    # Remove outras tags XML/HTML genéricas que possam sobrar
+    text = re.sub(r'<[^>]+>', '', text)
     # Remove caracteres de formatação (hashes de markdown, backticks)
     text = re.sub(r'[`#]', '', text)
     # Colapsa espaços múltiplos e linhas em branco

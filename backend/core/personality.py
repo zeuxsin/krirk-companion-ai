@@ -49,8 +49,10 @@ class PersonalitySystem:
     def build_system_prompt(
         self,
         current_emotion: str,
-        user_facts: list[str] | None = None,
+        user_profile: str | None = None,       # perfil estruturado (nome, profissão, etc.)
+        user_facts: list[str] | None = None,   # fatos complementares (texto livre)
         semantic_memories: list[str] | None = None,
+        tool_descriptions: str | None = None,  # mantido por compatibilidade, não usado
     ) -> str:
         """Monta o system prompt com personalidade, contexto e estado emocional."""
         name = self._data["name"]
@@ -80,13 +82,22 @@ DATA E HORA ATUAL: {_now_pt()}"""
 
         parts = [base]
 
+        # Perfil estruturado — dados permanentes e confiáveis (nome, profissão, etc.)
+        if user_profile:
+            parts.append(f"\nPERFIL DO USUÁRIO:\n{user_profile}")
+
+        # Fatos livres complementares (observações descobertas em conversa)
         if user_facts:
             lines = "\n".join(f"• {f}" for f in user_facts)
-            parts.append(f"\nO QUE VOCÊ SABE SOBRE O USUÁRIO:\n{lines}")
+            parts.append(f"\nOBSERVAÇÕES ADICIONAIS:\n{lines}")
 
+        # Memórias semânticas relevantes para a mensagem atual
         if semantic_memories:
             lines = "\n".join(f"• {m}" for m in semantic_memories[:5])
             parts.append(f"\nMEMÓRIAS RELEVANTES DE CONVERSAS ANTERIORES:\n{lines}")
+
+        # tool_descriptions não é injetado aqui —
+        # o roteamento de tools é feito pelo qwen2.5-coder via _decide_tool()
 
         note = _EMOTION_NOTES.get(current_emotion)
         if note:

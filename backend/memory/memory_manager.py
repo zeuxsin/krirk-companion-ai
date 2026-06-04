@@ -18,6 +18,10 @@ class MemoryManager:
         self._db_path = db_path
         self._init_db()
 
+        # Perfil estruturado do usuário
+        from backend.memory.profile_manager import ProfileManager
+        self.profile = ProfileManager(db_path)
+
         # Busca semântica via ChromaDB — degradação graciosa se não disponível
         try:
             from backend.memory.vector_store import VectorStore
@@ -139,7 +143,16 @@ class MemoryManager:
             return []
         return self._vectors.search(query, user_id, n=n)
 
-    def get_profile(self, user_id: str) -> Optional[dict]:
+    def get_profile(self, user_id: str) -> dict:
+        """Retorna o perfil estruturado do usuário (campos tipados como nome, profissao, etc.)."""
+        return self.profile.load(user_id)
+
+    def update_profile(self, user_id: str, profile: dict) -> None:
+        """Salva o perfil estruturado completo."""
+        self.profile.save(user_id, profile)
+
+    def _get_raw_profile(self, user_id: str) -> Optional[dict]:
+        """Acesso à row completa de user_profile (uso interno / get_stats)."""
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM user_profile WHERE user_id = ?", (user_id,)
@@ -161,13 +174,13 @@ class MemoryManager:
             )
 
     def get_stats(self, user_id: str) -> dict:
-        profile = self.get_profile(user_id)
+        raw = self._get_raw_profile(user_id)
         facts_count = len(self.get_facts(user_id, limit=1000))
         vector_count = self._vectors.count() if self._vectors else 0
         return {
-            "total_messages": profile["total_messages"] if profile else 0,
+            "total_messages": raw["total_messages"] if raw else 0,
             "facts_stored": facts_count,
-            "intimacy_level": profile["intimacy_level"] if profile else 0.0,
-            "first_seen": profile["first_seen"] if profile else None,
+            "intimacy_level": raw["intimacy_level"] if raw else 0.0,
+            "first_seen": raw["first_seen"] if raw else None,
             "semantic_memories": vector_count,
         }

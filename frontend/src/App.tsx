@@ -107,6 +107,29 @@ export default function App() {
         if (ev.audio) playAudioBase64(ev.audio)
         return
       }
+      if (ev.type === 'tool_call' && ev.tool) {
+        addMsg({
+          id: `tool-${Date.now()}`,
+          role: 'tool',
+          content: '',
+          toolName: ev.tool,
+          timestamp: new Date(),
+          isRunning: true,
+        })
+        return
+      }
+      if (ev.type === 'tool_result') {
+        setMessages(p => {
+          // Encontra a última mensagem de tool em execução e atualiza
+          const idx = [...p].reverse().findIndex(m => m.role === 'tool' && m.isRunning)
+          if (idx === -1) return p
+          const realIdx = p.length - 1 - idx
+          return p.map((m, i) =>
+            i === realIdx ? { ...m, isRunning: false, toolResult: ev.result } : m
+          )
+        })
+        return
+      }
       if (ev.type === 'screenshot_taken' && ev.thumbnail) {
         addMsg({
           id: `screenshot-${Date.now()}`,

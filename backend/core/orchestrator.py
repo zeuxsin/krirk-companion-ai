@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from pathlib import Path
 from typing import AsyncGenerator
 
 # Tags de raciocínio interno que alguns modelos (gemma3, qwen) incluem na resposta
@@ -20,6 +21,8 @@ from backend.memory.memory_manager import MemoryManager
 from backend.emotions.emotion_engine import EmotionEngine
 from backend.voice.tts import TTSEngine
 from backend.voice.stt import STTEngine
+
+_HOME = str(Path.home()).replace("\\", "/")
 
 
 class Orchestrator:
@@ -41,6 +44,26 @@ class Orchestrator:
         self.tts = TTSEngine(config["tts"])
         self.stt = STTEngine(config["stt"])
 
+        # ── Sistema de ferramentas (Fase 4 — dual-model) ──────────────────────
+        self._tool_cfg = config.get("tools", {"enabled": False})
+        self.tool_registry = None
+        self.tool_executor = None
+        if self._tool_cfg.get("enabled", False):
+            try:
+                from backend.tools.registry import build_default_registry
+                from backend.tools.executor import ToolExecutor
+                self.tool_registry = build_default_registry(self._tool_cfg)
+                self.tool_executor = ToolExecutor(
+                    self.tool_registry,
+                    timeout=self._tool_cfg.get("timeout_seconds", 10),
+                )
+                tool_model = self._tool_cfg.get("tool_model", self._ollama_config["model"])
+                print(f"[KRIRK][tools] Modelo de roteamento: {tool_model}")
+            except Exception as e:
+                print(f"[KRIRK][tools] Falha ao inicializar ferramentas: {e}")
+
+    # ── Streaming com o modelo principal (gemma3 — chat/personalidade) ────────
+
     async def _stream_ollama(
         self,
         messages: list[dict],
@@ -50,7 +73,6 @@ class Orchestrator:
             import ollama
             client = ollama.AsyncClient(host=self._ollama_config["base_url"])
 
-            # Anexa imagens à última mensagem do usuário (para visão)
             if images:
                 msgs = [m.copy() for m in messages]
                 msgs[-1] = {**msgs[-1], "images": images}
@@ -74,12 +96,110 @@ class Orchestrator:
         except Exception as e:
             yield f"[Erro ao conectar com Ollama: {e}. Certifique-se que o Ollama está rodando.]"
 
+    # ── Streaming com o modelo de tools (qwen2.5-coder — roteamento estruturado)
+
+    async def _stream_ollama_tool(self, messages: list[dict]) -> AsyncGenerator[str, None]:
+        """Usa o modelo especializado em tools para gerar JSON estruturado."""
+        try:
+            import ollama
+            tool_model = self._tool_cfg.get("tool_model", self._ollama_config["model"])
+            client = ollama.AsyncClient(host=self._ollama_config["base_url"])
+            async for chunk in await client.chat(
+                model=tool_model,
+                messages=messages,
+                stream=True,
+                options={
+                    "temperature": 0.1,    # baixa temperatura para JSON preciso
+                    "num_predict": 256,    # resposta curta — apenas o JSON de decisão
+                }
+            ):
+                content = chunk.get("message", {}).get("content", "")
+                if content:
+                    yield content
+        except Exception as e:
+            print(f"[KRIRK][tools] _stream_ollama_tool falhou: {e}")
+
+    # ── Decisão de tool (Fase 1) ──────────────────────────────────────────────
+
+    async def _decide_tool(self, message: str, history: list | None = None) -> dict | None:
+        """
+        Usa qwen2.5-coder para decidir QUAL ferramenta usar, se alguma.
+        Retorna dict {"tool": str, "params": dict} ou None se nenhuma tool for necessária.
+        """
+        if not (self.tool_registry and self.tool_executor):
+            return None
+
+        tool_desc = self.tool_registry.get_descriptions()
+
+        # Inclui as últimas 4 mensagens do histórico para dar contexto ao roteador
+        # (ex: "abre de novo" — o qwen precisa saber que Notepad estava aberto antes)
+        history_context = ""
+        if history:
+            recent = history[-4:]  # últimas 4 trocas
+            lines = []
+            for m in recent:
+                role = "User" if m["role"] == "user" else "Assistant"
+                lines.append(f"{role}: {m['content'][:120]}")
+            if lines:
+                history_context = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
+        planning_prompt = (
+            "You are a tool router for a desktop AI assistant. "
+            "Analyze the user's message and decide which tool to use, if any.\n\n"
+            f"User home directory: {_HOME}\n\n"
+            f"Available tools:\n{tool_desc}\n\n"
+            f"{history_context}"
+            f"User message: {message}\n\n"
+            "Rules:\n"
+            "- If a tool is needed, respond with ONLY valid JSON (no markdown, no explanation):\n"
+            '  {"tool": "exact_tool_name", "params": {"param_name": "value"}}\n'
+            "- If no tool is needed (casual conversation, questions about yourself, opinions), "
+            "respond with exactly: none\n"
+            "- Use the EXACT tool name as listed above. Do not translate to Portuguese.\n"
+            "- For run_powershell, write a complete PowerShell command.\n"
+            "- For list_directory and read_file, use the full absolute path.\n"
+            "- Use conversation history to resolve references like 'again', 'de novo', 'novamente'.\n"
+        )
+
+        raw = ""
+        async for token in self._stream_ollama_tool([
+            {"role": "user", "content": planning_prompt}
+        ]):
+            raw += token
+            if len(raw) > 512:
+                break
+
+        raw = raw.strip()
+        print(f"[KRIRK][tools] Decisão do roteador: {raw[:150]}")
+
+        # "none" ou resposta vazia → sem tool
+        if not raw or raw.lower().startswith("none"):
+            return None
+
+        # Extrai o primeiro bloco JSON da resposta (ignora texto extra)
+        try:
+            match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                if "tool" in data and "params" in data:
+                    return data
+        except Exception as e:
+            print(f"[KRIRK][tools] Falha ao parsear decisão: {e} — raw: {raw[:100]}")
+
+        return None
+
+    # ── Pipeline principal ────────────────────────────────────────────────────
+
     async def process_text(
         self,
         message: str,
         user_id: str = "default",
     ) -> AsyncGenerator[dict, None]:
-        """Main pipeline: text in → streaming tokens + complete response out."""
+        """
+        Pipeline de duas fases:
+          Fase 1 — qwen2.5-coder decide qual tool usar (se alguma)
+          Fase 2 — gemma3 gera a resposta final com personalidade
+        """
 
         self.state.set(AISystemState.THINKING)
         yield {"type": "status", "state": "thinking"}
@@ -90,7 +210,7 @@ class Orchestrator:
         )
         facts = self.memory.get_facts(user_id, limit=8)
 
-        # Memórias semânticas relevantes — busca no histórico completo via ChromaDB
+        # Memórias semânticas relevantes via ChromaDB
         semantic_memories: list[str] = []
         if self._vector_cfg.get("enabled", True):
             raw = self.memory.search_semantic(
@@ -99,27 +219,75 @@ class Orchestrator:
             min_score = self._vector_cfg.get("min_score", 0.45)
             semantic_memories = [r["text"] for r in raw if r["score"] >= min_score]
 
+        # ── FASE 1: Roteamento via qwen2.5-coder ─────────────────────────────
+        tool_result_context = ""
+        if self._tool_cfg.get("enabled", False) and self.tool_executor:
+            tool_decision = await self._decide_tool(message, history)
+
+            if tool_decision:
+                tool_name = tool_decision.get("tool", "ferramenta")
+
+                self.state.set(AISystemState.EXECUTING)
+                yield {"type": "status", "state": "executing"}
+                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(tool_decision)}
+
+                result = await self.tool_executor.execute_from_json(
+                    json.dumps(tool_decision)
+                )
+                print(f"[KRIRK][tools] {tool_name} → {result[:150]}")
+                yield {"type": "tool_result", "tool": tool_name, "result": result}
+
+                tool_result_context = (
+                    f"Consultei {tool_name} e o resultado foi:\n\n"
+                    f"{result}"
+                )
+
+        # ── FASE 2: Resposta final via gemma3 ─────────────────────────────────
+        # Perfil estruturado do usuário (nome, profissão, etc.)
+        profile = self.memory.get_profile(user_id)
+        profile_text = self.memory.profile.to_prompt_text(profile)
+
         system_prompt = self.personality.build_system_prompt(
             current_emotion=self.emotion.current_emotion,
+            user_profile=profile_text,
             user_facts=facts if facts else None,
             semantic_memories=semantic_memories if semantic_memories else None,
         )
 
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": message})
+        llm_messages = [{"role": "system", "content": system_prompt}]
+        llm_messages.extend(history)
+        llm_messages.append({"role": "user", "content": message})
 
-        self.memory.save_message(user_id, "user", message)
+        if tool_result_context:
+            # Injeta o resultado como turno de conversa multi-turn:
+            # assistant "já consultou" → user pede para responder
+            # Isso força o modelo a usar o resultado em vez de inventar
+            llm_messages.append({
+                "role": "assistant",
+                "content": tool_result_context,
+            })
+            llm_messages.append({
+                "role": "user",
+                "content": (
+                    f"O usuário perguntou: \"{message}\"\n"
+                    "Responda em português, de forma natural e bem curta. "
+                    "Use APENAS a parte do resultado que responde diretamente à pergunta. "
+                    "Se perguntou só a hora, diga só a hora. Se perguntou só o clipboard, diga só o conteúdo. "
+                    "Não mencione dados extras que não foram pedidos."
+                ),
+            })
+
+        self.memory.save_message(user_id, "user", message)  # salva mensagem original (sem context)
 
         self.state.set(AISystemState.SPEAKING)
         yield {"type": "status", "state": "speaking"}
 
         full_response = ""
-        async for token in self._stream_ollama(messages):
+        async for token in self._stream_ollama(llm_messages):
             full_response += token
             yield {"type": "token", "content": token}
 
-        # Remove blocos de raciocínio interno antes de salvar e reproduzir
+        # Pós-processamento: remove reasoning tags
         clean_response = _strip_reasoning(full_response)
 
         new_emotion = self.emotion.analyze_and_update(clean_response)
@@ -132,7 +300,7 @@ class Orchestrator:
 
         yield {
             "type": "response_complete",
-            "content": clean_response,   # versão limpa substitui o streaming no frontend
+            "content": clean_response,
             "emotion": new_emotion,
             "audio": audio_b64,
         }
@@ -180,7 +348,6 @@ class Orchestrator:
             yield {"type": "status", "state": "idle"}
             return
 
-        # Envia thumbnail para o frontend exibir no chat
         yield {"type": "screenshot_taken", "thumbnail": thumb_b64}
 
         self.memory.save_message(user_id, "user", f"[Screenshot] {prompt}")
@@ -219,15 +386,16 @@ class Orchestrator:
 
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """
-        Tarefa de background: usa o LLM para extrair fatos sobre o usuário
-        a partir do último par de mensagens e salva automaticamente na memória.
-        Executado de forma assíncrona — nunca bloqueia a resposta principal.
+        Background task: extrai fatos sobre o usuário do último par de mensagens.
+        Usa o modelo principal (gemma3) — não precisa de JSON estruturado.
         """
         prompt = (
-            "Analise esta conversa e extraia fatos concretos e permanentes sobre o USUÁRIO "
-            "(não sobre a IA). Retorne APENAS um JSON com lista de fatos objetivos. "
+            "Analise esta conversa e extraia fatos concretos e PERMANENTES sobre o USUÁRIO "
+            "(não sobre a IA). Retorne APENAS um JSON com lista de fatos objetivos.\n"
             "Se não houver fatos relevantes, retorne {\"fatos\": []}.\n"
-            "Exemplos de fatos bons: nome, profissão, cidade, hobby, preferência clara.\n"
+            "Exemplos BONS: nome, profissão, cidade, hobby específico, preferência clara.\n"
+            "NÃO extraia: hora, data, dia da semana, clima, valores numéricos temporários, "
+            "ações da conversa, perguntas feitas. Só inclua fatos que ainda serão verdade daqui a 6 meses.\n"
             "NÃO inclua suposições nem fatos sobre a conversa em si.\n\n"
             f"Usuário: {user_msg}\n"
             f"Assistente: {assistant_msg}\n\n"
@@ -238,7 +406,7 @@ class Orchestrator:
             raw = ""
             async for token in self._stream_ollama(messages):
                 raw += token
-                if len(raw) > 1000:  # limite de segurança
+                if len(raw) > 1000:
                     break
 
             match = re.search(r'\{.*?\}', raw, re.DOTALL)
@@ -252,6 +420,60 @@ class Orchestrator:
                     print(f"[KRIRK] Fato extraído: {fact}")
         except Exception as e:
             print(f"[KRIRK] extract_facts_bg falhou: {e}")
+
+    async def update_profile_bg(self, user_msg: str, asst_msg: str, user_id: str) -> None:
+        """
+        Background task: usa qwen2.5-coder para extrair atualizações estruturadas de perfil
+        a partir do último par de mensagens e mescla no perfil persistido.
+        Executado de forma assíncrona — nunca bloqueia a resposta principal.
+        """
+        current = self.memory.get_profile(user_id)
+        current_json = json.dumps(current, ensure_ascii=False)
+
+        prompt = (
+            f"Current user profile (JSON):\n{current_json}\n\n"
+            f"New conversation:\n"
+            f"User: {user_msg}\n"
+            f"Assistant: {asst_msg}\n\n"
+            "Task: Extract ONLY profile updates revealed in this conversation.\n"
+            "Rules:\n"
+            "- Return a JSON with ONLY fields that changed or were newly discovered.\n"
+            "- Use Portuguese for all values.\n"
+            "- For list fields (interesses, projetos, ferramentas, objetivos, notas): "
+            "return only NEW items to add, not the full list.\n"
+            "- Do NOT extract: time, date, day of week, weather, or temporary values.\n"
+            "- Only extract PERMANENT facts (still true in 6 months).\n"
+            "- If nothing new was discovered, return exactly: {}\n\n"
+            'Example: {"nome": "Erik", "profissao": "desenvolvedor", "interesses": ["Minecraft"]}\n'
+            "JSON:"
+        )
+
+        try:
+            raw = ""
+            async for token in self._stream_ollama_tool([{"role": "user", "content": prompt}]):
+                raw += token
+                if len(raw) > 800:
+                    break
+
+            raw = raw.strip()
+            if not raw or raw == "{}":
+                return
+
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not match:
+                return
+
+            delta = json.loads(match.group())
+            if not delta:
+                return
+
+            # Mescla delta no perfil atual e salva
+            updated = self.memory.profile.merge_update(current, delta)
+            self.memory.update_profile(user_id, updated)
+            print(f"[KRIRK][profile] Atualizado: {delta}")
+
+        except Exception as e:
+            print(f"[KRIRK][profile] update_profile_bg falhou: {e}")
 
     def get_status(self) -> dict:
         return {
