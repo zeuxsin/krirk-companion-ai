@@ -66,4 +66,10 @@ tools:
     - list_directory
     - search_files
     - web_search
+    - get_volume
+    - set_volume
+    - mute_volume
+    - media_play_pause
+    - media_next
+    - media_prev
     # write_file — omitido intencionalmente (potencialmente destrutivo)

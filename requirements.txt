@@ -40,6 +40,8 @@ sentence-transformers>=3.0.0
 # Web Search (Fase 4 — tools)
 ddgs>=0.1.0
 
+# Volume / Audio — usa PowerShell + Windows COM (sem dependências Python extras)
+
 # Visão computacional (Fase 3)
 mss>=9.0.0
 pillow>=10.0.0

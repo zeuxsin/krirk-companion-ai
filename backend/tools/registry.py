@@ -85,6 +85,30 @@ def build_default_registry(config: dict) -> ToolRegistry:
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar file_tools: {e}")
 
+    # ── Tools de mídia / volume ───────────────────────────────────────────────
+    try:
+        from backend.tools.builtin.media_tools import (
+            make_get_volume,
+            make_set_volume,
+            make_mute_volume,
+            make_media_play_pause,
+            make_media_next,
+            make_media_prev,
+        )
+        media_factories = {
+            "get_volume":        make_get_volume,
+            "set_volume":        make_set_volume,
+            "mute_volume":       make_mute_volume,
+            "media_play_pause":  make_media_play_pause,
+            "media_next":        make_media_next,
+            "media_prev":        make_media_prev,
+        }
+        for name, factory in media_factories.items():
+            if name in whitelist:
+                registry.register(factory())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar media_tools: {e}")
+
     # ── Tools de busca web ────────────────────────────────────────────────────
     try:
         from backend.tools.builtin.web_tools import make_web_search
