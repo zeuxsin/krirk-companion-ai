@@ -42,6 +42,13 @@ logging:
   level: "INFO"
   file: "logs/krirk.log"
 
+proactive:
+  enabled: true
+  check_interval: 30       # segundos entre cada verificação de tela
+  comment_cooldown: 180    # mínimo de segundos entre comentários espontâneos
+  user_idle_threshold: 60  # segundos de inatividade do usuário antes de comentar
+  spotify_enabled: true    # detectar troca de música no Spotify
+
 tools:
   enabled: true
   tool_model: "qwen2.5-coder:7b"   # modelo especializado para roteamento de ferramentas
@@ -58,4 +65,5 @@ tools:
     - read_file
     - list_directory
     - search_files
+    - web_search
     # write_file — omitido intencionalmente (potencialmente destrutivo)

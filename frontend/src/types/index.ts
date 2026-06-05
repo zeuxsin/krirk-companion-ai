@@ -18,10 +18,11 @@ export interface Message {
   emotion?: EmotionType
   timestamp: Date
   isStreaming?: boolean
-  thumbnail?: string   // base64 JPEG de screenshot para exibir no chat
-  toolName?: string    // nome da ferramenta (role === 'tool')
-  toolResult?: string  // resultado da execução (colapsável)
-  isRunning?: boolean  // true enquanto a ferramenta está sendo executada
+  thumbnail?: string    // base64 JPEG de screenshot para exibir no chat
+  toolName?: string     // nome da ferramenta (role === 'tool')
+  toolResult?: string   // resultado da execução (colapsável)
+  isRunning?: boolean   // true enquanto a ferramenta está sendo executada
+  isProactive?: boolean // true para comentários espontâneos da Krirk
 }
 
 export interface WSEvent {

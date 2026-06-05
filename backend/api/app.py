@@ -4,7 +4,8 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.core.orchestrator import Orchestrator
-from backend.api.websocket import handle_websocket
+from backend.core.proactive import ProactiveMonitor
+from backend.api.websocket import handle_websocket, manager as ws_manager, set_proactive_monitor
 
 
 def load_config(path: str = "configs/config.yaml") -> dict:
@@ -30,6 +31,15 @@ def create_app() -> FastAPI:
     )
 
     orchestrator = Orchestrator(config)
+
+    # Monitor proativo — inicia loop de observação de tela e Spotify
+    proactive_cfg = config.get("proactive", {"enabled": False})
+    proactive_monitor = ProactiveMonitor(orchestrator, ws_manager, proactive_cfg)
+
+    @app.on_event("startup")
+    async def _startup():
+        set_proactive_monitor(proactive_monitor)
+        await proactive_monitor.start()
 
     @app.get("/health")
     async def health():

@@ -69,12 +69,15 @@ function Bubble({ msg }: { msg: Message }) {
       alignItems: 'flex-end',
     }}>
       {!isUser && (
-        <div style={{
+        <div title={msg.isProactive ? 'Comentário espontâneo' : undefined} style={{
           width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
+          background: msg.isProactive
+            ? 'linear-gradient(135deg, #4f46e5, #7c3aed)'
+            : 'linear-gradient(135deg, #7c3aed, #a855f7)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 12, fontWeight: 700, color: '#fff',
-        }}>K</div>
+          fontSize: msg.isProactive ? 13 : 12, fontWeight: 700, color: '#fff',
+          opacity: msg.isProactive ? 0.85 : 1,
+        }}>{msg.isProactive ? '💭' : 'K'}</div>
       )}
       <div style={{
         maxWidth: '72%',

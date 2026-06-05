@@ -1,7 +1,15 @@
 import json
 import asyncio
+from typing import Optional
 from fastapi import WebSocket, WebSocketDisconnect
 from backend.core.orchestrator import Orchestrator
+
+# Referência opcional ao ProactiveMonitor — definida por app.py após o startup
+_proactive_monitor: Optional[object] = None
+
+def set_proactive_monitor(monitor) -> None:
+    global _proactive_monitor
+    _proactive_monitor = monitor
 
 
 class ConnectionManager:
@@ -71,6 +79,9 @@ async def handle_websocket(
                 content = payload.get("content", "").strip()
                 if not content:
                     continue
+                # Notifica o monitor proativo que o usuário está ativo
+                if _proactive_monitor:
+                    _proactive_monitor.mark_user_active()
                 last_response = ""
                 async for event in orchestrator.process_text(content, user_id=client_id):
                     await manager.send(client_id, event)

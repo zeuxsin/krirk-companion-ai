@@ -37,6 +37,9 @@ sentence-transformers>=3.0.0
 # pyautogui>=0.9.54
 # playwright>=1.45.0
 
+# Web Search (Fase 4 — tools)
+ddgs>=0.1.0
+
 # Visão computacional (Fase 3)
 mss>=9.0.0
 pillow>=10.0.0

@@ -85,5 +85,17 @@ def build_default_registry(config: dict) -> ToolRegistry:
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar file_tools: {e}")
 
+    # ── Tools de busca web ────────────────────────────────────────────────────
+    try:
+        from backend.tools.builtin.web_tools import make_web_search
+        web_factories = {
+            "web_search": make_web_search,
+        }
+        for name, factory in web_factories.items():
+            if name in whitelist:
+                registry.register(factory())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar web_tools: {e}")
+
     print(f"[KRIRK][tools] {len(registry.list_names())} ferramentas registradas: {registry.list_names()}")
     return registry

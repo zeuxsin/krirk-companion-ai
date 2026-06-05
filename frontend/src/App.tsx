@@ -107,6 +107,18 @@ export default function App() {
         if (ev.audio) playAudioBase64(ev.audio)
         return
       }
+      if (ev.type === 'proactive_comment' && ev.content) {
+        addMsg({
+          id: `proactive-${Date.now()}`,
+          role: 'assistant',
+          content: ev.content,
+          emotion: ev.emotion,
+          timestamp: new Date(),
+          isProactive: true,
+        })
+        if (ev.audio) playAudioBase64(ev.audio)
+        return
+      }
       if (ev.type === 'tool_call' && ev.tool) {
         addMsg({
           id: `tool-${Date.now()}`,

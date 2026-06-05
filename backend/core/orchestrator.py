@@ -266,15 +266,30 @@ class Orchestrator:
                 "role": "assistant",
                 "content": tool_result_context,
             })
-            llm_messages.append({
-                "role": "user",
-                "content": (
+
+            # Instrução de resposta varia por tipo de tool:
+            # web_search → resumo natural dos resultados
+            # outros     → resposta curta e direta
+            tool_name_used = tool_decision.get("tool", "") if tool_decision else ""
+            if tool_name_used == "web_search":
+                followup_instruction = (
+                    f"O usuário pediu: \"{message}\"\n"
+                    "Com base nos resultados da busca acima, responda em português de forma natural. "
+                    "Resuma o que encontraste em 2-4 frases. Mencione a fonte principal se relevante. "
+                    "Não invente informações além do que está nos resultados."
+                )
+            else:
+                followup_instruction = (
                     f"O usuário perguntou: \"{message}\"\n"
                     "Responda em português, de forma natural e bem curta. "
                     "Use APENAS a parte do resultado que responde diretamente à pergunta. "
                     "Se perguntou só a hora, diga só a hora. Se perguntou só o clipboard, diga só o conteúdo. "
                     "Não mencione dados extras que não foram pedidos."
-                ),
+                )
+
+            llm_messages.append({
+                "role": "user",
+                "content": followup_instruction,
             })
 
         self.memory.save_message(user_id, "user", message)  # salva mensagem original (sem context)
