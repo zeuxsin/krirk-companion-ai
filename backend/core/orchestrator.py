@@ -52,7 +52,7 @@ class Orchestrator:
             try:
                 from backend.tools.registry import build_default_registry
                 from backend.tools.executor import ToolExecutor
-                self.tool_registry = build_default_registry(self._tool_cfg)
+                self.tool_registry = build_default_registry(self._tool_cfg, memory=self.memory)
                 self.tool_executor = ToolExecutor(
                     self.tool_registry,
                     timeout=self._tool_cfg.get("timeout_seconds", 10),
@@ -153,8 +153,13 @@ class Orchestrator:
             "Rules:\n"
             "- If a tool is needed, respond with ONLY valid JSON (no markdown, no explanation):\n"
             '  {"tool": "exact_tool_name", "params": {"param_name": "value"}}\n'
-            "- If no tool is needed (casual conversation, questions about yourself, opinions), "
-            "respond with exactly: none\n"
+            "- If no tool is needed, respond with exactly: none\n"
+            "- NEVER use a tool for: greetings, thanks, short replies, confirmations, "
+            "reactions ('ok', 'isso aí', 'certo', 'sim', 'não', 'ótimo', 'entendi', 'legal', "
+            "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, or casual chat.\n"
+            "- search_memory: ONLY use when the user is EXPLICITLY asking to recall past "
+            "conversations ('você lembra?', 'o que eu te falei?', 'qual era mesmo?'). "
+            "Do NOT use for confirmations or reactions to what was just said.\n"
             "- Use the EXACT tool name as listed above. Do not translate to Portuguese.\n"
             "- For run_powershell, write a complete PowerShell command.\n"
             "- For list_directory and read_file, use the full absolute path.\n"
@@ -271,13 +276,21 @@ class Orchestrator:
             # web_search → resumo natural dos resultados
             # outros     → resposta curta e direta
             tool_name_used = tool_decision.get("tool", "") if tool_decision else ""
-            if tool_name_used == "web_search":
-                followup_instruction = (
-                    f"O usuário pediu: \"{message}\"\n"
-                    "Com base nos resultados da busca acima, responda em português de forma natural. "
-                    "Resuma o que encontraste em 2-4 frases. Mencione a fonte principal se relevante. "
-                    "Não invente informações além do que está nos resultados."
-                )
+            if tool_name_used in ("web_search", "search_memory"):
+                if tool_name_used == "web_search":
+                    followup_instruction = (
+                        f"O usuário pediu: \"{message}\"\n"
+                        "Com base nos resultados da busca acima, responda em português de forma natural. "
+                        "Resuma o que encontraste em 2-4 frases. Mencione a fonte principal se relevante. "
+                        "Não invente informações além do que está nos resultados."
+                    )
+                else:  # search_memory
+                    followup_instruction = (
+                        f"O usuário perguntou: \"{message}\"\n"
+                        "Com base nas memórias encontradas acima, responda em português de forma natural e pessoal. "
+                        "Cite o que foi dito anteriormente com precisão. "
+                        "Se as memórias não respondem diretamente à pergunta, diga que não encontrou registros claros sobre isso."
+                    )
             else:
                 followup_instruction = (
                     f"O usuário perguntou: \"{message}\"\n"

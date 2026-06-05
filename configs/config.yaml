@@ -72,4 +72,5 @@ tools:
     - media_play_pause
     - media_next
     - media_prev
+    - search_memory
     # write_file — omitido intencionalmente (potencialmente destrutivo)

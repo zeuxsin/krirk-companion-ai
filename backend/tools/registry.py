@@ -31,7 +31,7 @@ class ToolRegistry:
         return "\n".join(lines)
 
 
-def build_default_registry(config: dict) -> ToolRegistry:
+def build_default_registry(config: dict, memory=None) -> ToolRegistry:
     """
     Instancia e registra as ferramentas padrão conforme a whitelist do config.
     Importa as tools sob demanda para evitar dependências circulares.
@@ -120,6 +120,15 @@ def build_default_registry(config: dict) -> ToolRegistry:
                 registry.register(factory())
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar web_tools: {e}")
+
+    # ── Tool de busca na memória semântica ───────────────────────────────────
+    if memory is not None:
+        try:
+            from backend.tools.builtin.memory_tools import make_search_memory
+            if "search_memory" in whitelist:
+                registry.register(make_search_memory(memory))
+        except Exception as e:
+            print(f"[KRIRK][tools] Erro ao carregar memory_tools: {e}")
 
     print(f"[KRIRK][tools] {len(registry.list_names())} ferramentas registradas: {registry.list_names()}")
     return registry
