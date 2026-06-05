@@ -76,3 +76,44 @@ body {
 .anim-sway       { animation: sway       2s ease-in-out infinite; }
 .anim-pulse      { animation: pulse-scale 0.8s ease-in-out infinite; }
 .anim-fadein     { animation: fadeInUp   0.2s ease; }
+
+/* ── Animações específicas por emoção ────────────────────────────────── */
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+@keyframes bounce-fast {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-15px); }
+}
+@keyframes lean {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  50%       { transform: rotate(5deg) translateY(-3px); }
+}
+@keyframes droop {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(6px); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  20%       { transform: rotate(-6deg); }
+  60%       { transform: rotate(6deg); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-5px) rotate(-2deg); }
+  60%       { transform: translateX(5px)  rotate(2deg); }
+}
+@keyframes wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25%       { transform: rotate(-4deg) translateY(-2px); }
+  75%       { transform: rotate(3deg)  translateY(2px); }
+}
+
+.anim-bounce      { animation: bounce      1.8s ease-in-out infinite; }
+.anim-bounce-fast { animation: bounce-fast 0.85s ease-in-out infinite; }
+.anim-lean        { animation: lean        2.5s ease-in-out infinite; }
+.anim-droop       { animation: droop       3s   ease-in-out infinite; }
+.anim-wiggle      { animation: wiggle      1.2s ease-in-out infinite; }
+.anim-shake       { animation: shake       0.45s ease-in-out infinite; }
+.anim-wobble      { animation: wobble      1.5s ease-in-out infinite; }

@@ -1,19 +1,8 @@
 import React from 'react'
 import { EmotionType, AIState } from '../types'
+import { EMOTION_COLOR } from '../utils/emotions'
 
 export type AppMode = 'chat' | 'sidebar' | 'avatar' | 'settings'
-
-const EMOTION_COLOR: Record<EmotionType, string> = {
-  neutral:    '#71717a',
-  happy:      '#a78bfa',
-  excited:    '#f59e0b',
-  thoughtful: '#60a5fa',
-  curious:    '#34d399',
-  concerned:  '#f87171',
-  playful:    '#fb923c',
-  angry:      '#ef4444',
-  confused:   '#c084fc',
-}
 
 const MODE_ITEMS: { id: AppMode; label: string; icon: string }[] = [
   { id: 'chat',     label: 'Chat',          icon: '💬' },

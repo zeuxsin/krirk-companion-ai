@@ -1,17 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { EmotionType } from '../types'
-
-const EMOTION_COLOR: Record<EmotionType, string> = {
-  neutral:    '#71717a',
-  happy:      '#a78bfa',
-  excited:    '#f59e0b',
-  thoughtful: '#60a5fa',
-  curious:    '#34d399',
-  concerned:  '#f87171',
-  playful:    '#fb923c',
-  angry:      '#ef4444',
-  confused:   '#c084fc',
-}
+import { EMOTION_COLOR } from '../utils/emotions'
 
 interface Props {
   emotion: EmotionType

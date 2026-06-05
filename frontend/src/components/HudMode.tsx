@@ -1,26 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { EmotionType, AIState, Message } from '../types'
 import { VoiceButton } from './VoiceButton'
-
-const EMOTION_TO_IMG: Record<EmotionType, string> = {
-  neutral:    'neutro',
-  happy:      'animada',
-  excited:    'surpresa',
-  thoughtful: 'pensando',
-  curious:    'curiosa',
-  concerned:  'cansada',
-  playful:    'animada',
-  angry:      'irritada',
-  confused:   'confusa',
-}
-
-const ANIM_BY_STATE: Record<AIState, string> = {
-  idle:      'anim-float',
-  speaking:  'anim-float-fast',
-  thinking:  'anim-sway',
-  listening: 'anim-pulse',
-  executing: '',
-}
+import { EMOTION_COLOR, avatarAnimClass, avatarSrc, avatarFallback } from '../utils/emotions'
 
 interface Props {
   messages: Message[]
@@ -33,7 +14,7 @@ interface Props {
 }
 
 export function HudMode({ messages, addMsg, emotion, aiState, connected, aiStateBusy, sendMessage }: Props) {
-  const [imgSrc, setImgSrc] = useState(`/avatar/${EMOTION_TO_IMG[emotion]}.png`)
+  const [imgSrc, setImgSrc] = useState(avatarSrc(emotion))
   const [imgOpacity, setImgOpacity] = useState(1)
   const [input, setInput] = useState('')
   const prevEmotion = useRef(emotion)
@@ -44,14 +25,14 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
     prevEmotion.current = emotion
     setImgOpacity(0)
     const t = setTimeout(() => {
-      setImgSrc(`/avatar/${EMOTION_TO_IMG[emotion]}.png`)
+      setImgSrc(avatarSrc(emotion))
       setImgOpacity(1)
     }, 150)
     return () => clearTimeout(t)
   }, [emotion])
 
   const handleImgError = useCallback(() => {
-    setImgSrc(src => src.endsWith('.png') ? `/avatar/${EMOTION_TO_IMG[emotion]}.svg` : src)
+    setImgSrc(src => src.endsWith('.png') ? avatarFallback(emotion) : src)
   }, [emotion])
 
   const submit = useCallback(() => {
@@ -80,27 +61,38 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
         background: 'var(--color-krirk-bg)',
         borderBottom: '1px solid var(--color-krirk-border)',
       }}>
-        <img
-          src={imgSrc}
-          onError={handleImgError}
-          className={ANIM_BY_STATE[aiState]}
-          alt={emotion}
-          style={{
-            width: 120,
-            opacity: imgOpacity,
-            transition: 'opacity 0.15s',
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {/* Anel de brilho */}
+          <div style={{
+            position: 'absolute',
+            width: 130, height: 130,
+            borderRadius: '50%',
+            background: `radial-gradient(circle, ${EMOTION_COLOR[emotion]}18 0%, transparent 65%)`,
+            boxShadow: `0 0 30px 6px ${EMOTION_COLOR[emotion]}28`,
+            transition: 'background 0.6s ease, box-shadow 0.6s ease',
             pointerEvents: 'none',
-            filter: aiState === 'speaking'
-              ? 'drop-shadow(0 0 10px rgba(124,58,237,0.5))' : 'none',
-          }}
-        />
+          }} />
+          <img
+            src={imgSrc}
+            onError={handleImgError}
+            className={avatarAnimClass(aiState, emotion)}
+            alt={emotion}
+            style={{
+              width: 120,
+              position: 'relative', zIndex: 1,
+              opacity: imgOpacity,
+              transition: 'opacity 0.15s',
+              pointerEvents: 'none',
+              filter: aiState === 'speaking'
+                ? `drop-shadow(0 0 10px ${EMOTION_COLOR[emotion]}88)` : 'none',
+            }}
+          />
+        </div>
         <div style={{
-          marginTop: 4,
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--color-krirk-muted)',
+          marginTop: 4, fontSize: 9, fontWeight: 700,
+          letterSpacing: '0.14em', textTransform: 'uppercase',
+          color: EMOTION_COLOR[emotion],
+          transition: 'color 0.4s ease',
         }}>
           {emotion}
         </div>
