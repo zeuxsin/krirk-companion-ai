@@ -12,9 +12,9 @@ tts:
   enabled: true
 
 stt:
-  model: "base"
+  model: "base"       # ~150 MB, baixado automaticamente na 1ª execução
   language: "pt"
-  enabled: false
+  enabled: true
 
 memory:
   short_term_limit: 20
@@ -49,6 +49,10 @@ proactive:
   user_idle_threshold: 60  # segundos de inatividade do usuário antes de comentar
   spotify_enabled: true    # detectar troca de música no Spotify
 
+knowledge_graph:
+  enabled: true
+  max_relations_in_prompt: 25   # máximo de relações injetadas no system prompt
+
 tools:
   enabled: true
   tool_model: "qwen2.5-coder:7b"   # modelo especializado para roteamento de ferramentas
@@ -73,4 +77,7 @@ tools:
     - media_next
     - media_prev
     - search_memory
+    - open_url
+    - open_app
+    - set_timer
     # write_file — omitido intencionalmente (potencialmente destrutivo)

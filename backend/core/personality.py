@@ -49,10 +49,11 @@ class PersonalitySystem:
     def build_system_prompt(
         self,
         current_emotion: str,
-        user_profile: str | None = None,       # perfil estruturado (nome, profissão, etc.)
-        user_facts: list[str] | None = None,   # fatos complementares (texto livre)
+        user_profile: str | None = None,        # perfil estruturado (nome, profissão, etc.)
+        user_facts: list[str] | None = None,    # fatos complementares (texto livre)
         semantic_memories: list[str] | None = None,
-        tool_descriptions: str | None = None,  # mantido por compatibilidade, não usado
+        knowledge_graph: str | None = None,     # relações permanentes do KG
+        tool_descriptions: str | None = None,   # mantido por compatibilidade, não usado
     ) -> str:
         """Monta o system prompt com personalidade, contexto e estado emocional."""
         name = self._data["name"]
@@ -85,6 +86,10 @@ DATA E HORA ATUAL: {_now_pt()}"""
         # Perfil estruturado — dados permanentes e confiáveis (nome, profissão, etc.)
         if user_profile:
             parts.append(f"\nPERFIL DO USUÁRIO:\n{user_profile}")
+
+        # Grafo de conhecimento — relações estruturadas permanentes
+        if knowledge_graph:
+            parts.append(f"\nCONHECIMENTO ESTRUTURADO (relações permanentes):\n{knowledge_graph}")
 
         # Fatos livres complementares (observações descobertas em conversa)
         if user_facts:

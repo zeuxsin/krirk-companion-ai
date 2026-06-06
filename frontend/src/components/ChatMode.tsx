@@ -122,13 +122,14 @@ interface Props {
   messages: Message[]
   addMsg: (msg: Message) => void
   sendMessage: (text: string) => void
+  sendAudio: (b64Wav: string) => void
   sendScreenshot: (prompt: string) => void
   connected: boolean
   aiStateBusy: boolean
 }
 
 // ─── ChatMode ─────────────────────────────────────────────────────────────────
-export function ChatMode({ messages, addMsg, sendMessage, sendScreenshot, connected, aiStateBusy }: Props) {
+export function ChatMode({ messages, addMsg, sendMessage, sendAudio, sendScreenshot, connected, aiStateBusy }: Props) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -146,11 +147,6 @@ export function ChatMode({ messages, addMsg, sendMessage, sendScreenshot, connec
     setInput('')
     inputRef.current?.focus()
   }, [input, connected, aiStateBusy, addMsg, sendMessage])
-
-  const handleTranscript = useCallback((text: string) => {
-    addMsg({ id: `user-${Date.now()}`, role: 'user', content: text, timestamp: new Date() })
-    sendMessage(text)
-  }, [addMsg, sendMessage])
 
   const handleVoiceError = useCallback((msg: string) => {
     addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date() })
@@ -202,7 +198,7 @@ export function ChatMode({ messages, addMsg, sendMessage, sendScreenshot, connec
         background: 'var(--color-krirk-sidebar)',
       }}>
         <VoiceButton
-          onTranscript={handleTranscript}
+          sendAudio={sendAudio}
           onError={handleVoiceError}
           disabled={!connected || aiStateBusy}
         />

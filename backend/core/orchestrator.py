@@ -252,11 +252,19 @@ class Orchestrator:
         profile = self.memory.get_profile(user_id)
         profile_text = self.memory.profile.to_prompt_text(profile)
 
+        # Knowledge Graph — relações permanentes (entidades + verbos)
+        kg_cfg = self._config.get("knowledge_graph", {})
+        kg_text: str | None = None
+        if kg_cfg.get("enabled", True):
+            max_rel = kg_cfg.get("max_relations_in_prompt", 25)
+            kg_text = self.memory.kg.to_prompt_text(user_id, max_relations=max_rel)
+
         system_prompt = self.personality.build_system_prompt(
             current_emotion=self.emotion.current_emotion,
             user_profile=profile_text,
             user_facts=facts if facts else None,
             semantic_memories=semantic_memories if semantic_memories else None,
+            knowledge_graph=kg_text,
         )
 
         llm_messages = [{"role": "system", "content": system_prompt}]
@@ -321,6 +329,11 @@ class Orchestrator:
         new_emotion = self.emotion.analyze_and_update(clean_response)
         self.memory.save_message(user_id, "assistant", clean_response, emotion=new_emotion)
         self.memory.update_intimacy(user_id, 0.1)
+
+        # Background tasks — executam em paralelo sem bloquear a resposta
+        asyncio.create_task(self.extract_facts_bg(message, clean_response, user_id))
+        asyncio.create_task(self.update_profile_bg(message, clean_response, user_id))
+        asyncio.create_task(self.extract_kg_bg(message, clean_response, user_id))
 
         audio_b64 = await self.tts.generate(clean_response)
 
@@ -502,6 +515,65 @@ class Orchestrator:
 
         except Exception as e:
             print(f"[KRIRK][profile] update_profile_bg falhou: {e}")
+
+    async def extract_kg_bg(self, user_msg: str, asst_msg: str, user_id: str) -> None:
+        """
+        Background task: extrai entidades e relações permanentes via qwen2.5-coder.
+        Persiste no KnowledgeGraphManager (SQLite) sem duplicatas.
+        """
+        prompt = (
+            "Analise a conversa e extraia entidades e relações concretas "
+            "APENAS sobre o USUÁRIO ou coisas que ele possui, usa, criou ou está envolvido.\n"
+            "Retorne SOMENTE JSON válido no formato:\n"
+            '{"entities": [{"name": "...", "type": "pessoa|projeto|tecnologia|lugar|conceito"}], '
+            '"relations": [{"from": "...", "relation": "...", "to": "..."}]}\n\n'
+            "Regras:\n"
+            "- Verbos de relação curtos e objetivos: usa, criou, trabalha_em, mora_em, "
+            "gosta_de, estuda, tem, conhece\n"
+            "- Apenas fatos PERMANENTES (ainda verdadeiros em 6 meses)\n"
+            "- Entidades específicas e nomeadas (não genéricas como 'linguagem', 'ferramenta')\n"
+            "- Se nada relevante encontrado: {\"entities\": [], \"relations\": []}\n\n"
+            f"User: {user_msg}\n"
+            f"Assistant: {asst_msg}\n\n"
+            "JSON:"
+        )
+        try:
+            raw = ""
+            async for token in self._stream_ollama_tool([{"role": "user", "content": prompt}]):
+                raw += token
+                if len(raw) > 1000:
+                    break
+
+            raw = raw.strip()
+            if not raw:
+                return
+
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not match:
+                return
+
+            data = json.loads(match.group())
+
+            # Persiste entidades
+            for entity in data.get("entities", []):
+                name = str(entity.get("name", "")).strip()
+                etype = str(entity.get("type", "conceito")).strip()
+                if name and len(name) > 1:
+                    self.memory.kg.upsert_entity(user_id, name, etype)
+
+            # Persiste relações (também garante que as entidades existam)
+            for rel in data.get("relations", []):
+                efrom = str(rel.get("from", "")).strip()
+                relation = str(rel.get("relation", "")).strip()
+                eto = str(rel.get("to", "")).strip()
+                if efrom and relation and eto:
+                    self.memory.kg.upsert_entity(user_id, efrom, "conceito")
+                    self.memory.kg.upsert_entity(user_id, eto, "conceito")
+                    self.memory.kg.upsert_relation(user_id, efrom, relation, eto)
+                    print(f"[KG] {efrom} → {relation} → {eto}")
+
+        except Exception as e:
+            print(f"[KG] extract_kg_bg falhou: {e}")
 
     def get_status(self) -> dict:
         return {

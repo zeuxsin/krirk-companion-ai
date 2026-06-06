@@ -41,7 +41,7 @@ async function openSettingsWindow() {
 }
 
 export default function App() {
-  const { connected, aiState, emotion, sendMessage, sendScreenshot, onEvent } = useWebSocket()
+  const { connected, aiState, emotion, sendMessage, sendAudio, sendScreenshot, onEvent } = useWebSocket()
   const [mode, setMode] = useState<AppMode>('chat')
 
   // ── Estado de mensagens compartilhado ─────────────────────────────────────
@@ -117,6 +117,17 @@ export default function App() {
           isProactive: true,
         })
         if (ev.audio) playAudioBase64(ev.audio)
+        // Notificação nativa Windows quando janela está oculta na bandeja
+        ;(async () => {
+          try {
+            const { invoke } = await import('@tauri-apps/api/core')
+            const visible = await invoke<boolean>('is_window_visible')
+            if (!visible) {
+              const { sendNotification } = await import('@tauri-apps/plugin-notification')
+              sendNotification({ title: 'Krirk', body: ev.content!.slice(0, 100) })
+            }
+          } catch { /* browser dev mode — ignora */ }
+        })()
         return
       }
       if (ev.type === 'tool_call' && ev.tool) {
@@ -230,6 +241,7 @@ export default function App() {
           messages={messages}
           addMsg={addMsg}
           sendMessage={sendMessage}
+          sendAudio={sendAudio}
           sendScreenshot={sendScreenshot}
           connected={connected}
           aiStateBusy={aiStateBusy}

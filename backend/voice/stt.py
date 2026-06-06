@@ -1,12 +1,15 @@
+import asyncio
 import base64
-import io
+import os
+import tempfile
 from typing import Optional
 
 
 class STTEngine:
-    """Speech-to-Text usando faster-whisper (requer Python <=3.12 e GPU/CPU).
+    """Speech-to-Text usando faster-whisper (local, sem internet).
 
-    Fallback: retorna None se não disponível.
+    A transcrição é executada via run_in_executor para não bloquear o event loop.
+    Na 1ª execução baixa o modelo (~150 MB para 'base').
     """
 
     def __init__(self, config: dict):
@@ -24,23 +27,22 @@ class STTEngine:
             from faster_whisper import WhisperModel
             self._model = WhisperModel(
                 self._model_name,
-                device="auto",
+                device="cpu",       # CUDA opcional — evita erro de cublas64_12.dll
                 compute_type="int8",
             )
             print(f"[STT] Whisper model '{self._model_name}' loaded")
         except ImportError:
-            print("[STT] faster-whisper not installed. STT disabled.")
+            print("[STT] faster-whisper not installed. Run: pip install faster-whisper")
             self._enabled = False
         except Exception as e:
             print(f"[STT] Failed to load model: {e}")
             self._enabled = False
 
-    async def transcribe_bytes(self, audio_data: bytes) -> Optional[str]:
-        """Transcribes raw WAV audio bytes. Returns text or None."""
-        if not self._enabled or self._model is None:
-            return None
+    # ── Sync helper (roda em thread pool via run_in_executor) ─────────────────
+
+    def _transcribe_sync(self, audio_data: bytes) -> Optional[str]:
+        """Transcreve bytes WAV de forma síncrona (thread pool)."""
         try:
-            import tempfile, os
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp.write(audio_data)
                 tmp_path = tmp.name
@@ -56,7 +58,17 @@ class STTEngine:
             print(f"[STT] Transcription error: {e}")
             return None
 
+    # ── Async API ─────────────────────────────────────────────────────────────
+
+    async def transcribe_bytes(self, audio_data: bytes) -> Optional[str]:
+        """Transcreve bytes WAV. Não bloqueia o event loop."""
+        if not self._enabled or self._model is None:
+            return None
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
+
     async def transcribe_base64(self, b64_audio: str) -> Optional[str]:
+        """Decodifica base64 e transcreve."""
         audio_bytes = base64.b64decode(b64_audio)
         return await self.transcribe_bytes(audio_bytes)
 

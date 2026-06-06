@@ -22,6 +22,10 @@ class MemoryManager:
         from backend.memory.profile_manager import ProfileManager
         self.profile = ProfileManager(db_path)
 
+        # Grafo de conhecimento — entidades e relações permanentes
+        from backend.memory.knowledge_graph import KnowledgeGraphManager
+        self.kg = KnowledgeGraphManager(db_path)
+
         # Busca semântica via ChromaDB — degradação graciosa se não disponível
         try:
             from backend.memory.vector_store import VectorStore

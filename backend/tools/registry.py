@@ -121,6 +121,24 @@ def build_default_registry(config: dict, memory=None) -> ToolRegistry:
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar web_tools: {e}")
 
+    # ── Tools de desktop (abrir apps/URLs, timer) ────────────────────────────
+    try:
+        from backend.tools.builtin.desktop_tools import (
+            make_open_url,
+            make_open_app,
+            make_set_timer,
+        )
+        desktop_factories = {
+            "open_url":  make_open_url,
+            "open_app":  make_open_app,
+            "set_timer": make_set_timer,
+        }
+        for name, factory in desktop_factories.items():
+            if name in whitelist:
+                registry.register(factory())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar desktop_tools: {e}")
+
     # ── Tool de busca na memória semântica ───────────────────────────────────
     if memory is not None:
         try:
