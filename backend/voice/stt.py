@@ -72,6 +72,12 @@ class STTEngine:
         audio_bytes = base64.b64decode(b64_audio)
         return await self.transcribe_bytes(audio_bytes)
 
+    def set_enabled(self, value: bool) -> None:
+        """Liga/desliga o STT em runtime. Carrega o modelo lazy se necessário."""
+        if value and not self._model:
+            self._load_model()
+        self._enabled = value
+
     @property
     def enabled(self) -> bool:
         return self._enabled

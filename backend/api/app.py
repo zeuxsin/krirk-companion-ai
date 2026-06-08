@@ -77,17 +77,35 @@ def create_app() -> FastAPI:
     @app.get("/api/settings")
     async def get_settings():
         return {
-            "tts_enabled": orchestrator.tts._enabled,
-            "tts_voice":   orchestrator.tts._voice,
+            "tts_enabled":       orchestrator.tts._enabled,
+            "tts_voice":         orchestrator.tts._voice,
+            "stt_enabled":       orchestrator.stt._enabled,
+            "ollama_model":      orchestrator._ollama_config["model"],
+            "temperature":       orchestrator._ollama_config["temperature"],
+            "proactive_enabled": proactive_monitor._enabled,
+            "krirk_name":        orchestrator.personality.name,
+            "personality_notes": orchestrator.personality.personality_notes,
         }
 
     @app.post("/api/settings")
     async def update_settings(request: Request):
         body = await request.json()
-        if "tts_enabled" in body:
+        if "tts_enabled"       in body:
             orchestrator.tts.set_enabled(bool(body["tts_enabled"]))
-        if "tts_voice" in body:
+        if "tts_voice"         in body:
             orchestrator.tts.set_voice(str(body["tts_voice"]))
+        if "stt_enabled"       in body:
+            orchestrator.stt.set_enabled(bool(body["stt_enabled"]))
+        if "ollama_model"      in body:
+            orchestrator._ollama_config["model"] = str(body["ollama_model"])
+        if "temperature"       in body:
+            orchestrator._ollama_config["temperature"] = float(body["temperature"])
+        if "proactive_enabled" in body:
+            proactive_monitor.set_enabled(bool(body["proactive_enabled"]))
+        if "krirk_name"        in body:
+            orchestrator.personality.set_name(str(body["krirk_name"]))
+        if "personality_notes" in body:
+            orchestrator.personality.set_notes(str(body["personality_notes"]))
         return {"ok": True}
 
     @app.websocket("/ws")

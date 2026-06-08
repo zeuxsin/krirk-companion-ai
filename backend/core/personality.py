@@ -39,12 +39,35 @@ class PersonalitySystem:
         p = Path(config_path)
         if not p.exists():
             raise FileNotFoundError(f"Personality config not found: {config_path}")
+        self._config_path = p
         with open(p, encoding="utf-8") as f:
             self._data = json.load(f)
 
     @property
     def name(self) -> str:
         return self._data["name"]
+
+    @property
+    def personality_notes(self) -> str:
+        return self._data.get("custom_notes", "")
+
+    def set_name(self, name: str) -> None:
+        """Atualiza o nome da Krirk e persiste em personality.json."""
+        self._data["name"] = name.strip() or "Krirk"
+        self._save_to_file()
+
+    def set_notes(self, notes: str) -> None:
+        """Atualiza as notas de comportamento personalizadas e persiste."""
+        self._data["custom_notes"] = notes.strip()
+        self._save_to_file()
+
+    def _save_to_file(self) -> None:
+        """Salva o estado atual de _data em personality.json."""
+        try:
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[Personality] Erro ao salvar {self._config_path}: {e}")
 
     def build_system_prompt(
         self,
@@ -103,6 +126,11 @@ DATA E HORA ATUAL: {_now_pt()}"""
 
         # tool_descriptions não é injetado aqui —
         # o roteamento de tools é feito pelo qwen2.5-coder via _decide_tool()
+
+        # Notas de comportamento personalizadas pelo usuário (via Configurações)
+        custom = self._data.get("custom_notes", "").strip()
+        if custom:
+            parts.append(f"\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n{custom}")
 
         note = _EMOTION_NOTES.get(current_emotion)
         if note:

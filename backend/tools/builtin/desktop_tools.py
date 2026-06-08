@@ -11,16 +11,44 @@ import subprocess
 import threading
 from typing import Optional
 
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolParam
 
 
 # ── open_url ─────────────────────────────────────────────────────────────────
 
+# Nomes comuns de sites → URL canônica
+_SITE_ALIASES: dict[str, str] = {
+    "youtube":     "https://youtube.com",
+    "google":      "https://google.com",
+    "github":      "https://github.com",
+    "reddit":      "https://reddit.com",
+    "twitter":     "https://twitter.com",
+    "x":           "https://x.com",
+    "instagram":   "https://instagram.com",
+    "facebook":    "https://facebook.com",
+    "netflix":     "https://netflix.com",
+    "spotify":     "https://open.spotify.com",
+    "twitch":      "https://twitch.tv",
+    "discord":     "https://discord.com/app",
+    "gmail":       "https://mail.google.com",
+    "chatgpt":     "https://chatgpt.com",
+    "claude":      "https://claude.ai",
+    "stackoverflow": "https://stackoverflow.com",
+    "wikipedia":   "https://wikipedia.org",
+    "amazon":      "https://amazon.com.br",
+    "mercadolivre": "https://mercadolivre.com.br",
+    "linkedin":    "https://linkedin.com",
+}
+
+
 async def _open_url(url: str) -> str:
     """Abre uma URL no browser padrão do Windows."""
     try:
-        # Garante protocolo
-        if not url.startswith(("http://", "https://")):
+        # Verifica se é um nome de site conhecido
+        key = url.lower().strip().rstrip("/")
+        if key in _SITE_ALIASES:
+            url = _SITE_ALIASES[key]
+        elif not url.startswith(("http://", "https://")):
             url = "https://" + url
         subprocess.Popen(["start", url], shell=True)
         return f"URL aberta: {url}"
@@ -36,13 +64,14 @@ def make_open_url() -> Tool:
             "Use quando o usuário pedir para abrir um site, link ou página web. "
             "Exemplos: 'abre o YouTube', 'vai no GitHub', 'abre google.com'."
         ),
-        parameters={
-            "url": {
-                "type": "string",
-                "description": "URL completa ou domínio a abrir (ex: 'youtube.com', 'https://github.com')",
-            }
-        },
-        handler=_open_url,
+        params=[
+            ToolParam(
+                name="url",
+                type="string",
+                description="URL completa, domínio ou nome do site (ex: 'youtube', 'https://github.com')",
+            )
+        ],
+        func=_open_url,
     )
 
 
@@ -96,13 +125,14 @@ def make_open_app() -> Tool:
             "Use quando o usuário pedir para abrir um programa. "
             "Exemplos: 'abre o Notepad', 'abre o Spotify', 'abre o VS Code', 'abre o Chrome'."
         ),
-        parameters={
-            "app_name": {
-                "type": "string",
-                "description": "Nome do aplicativo a abrir (ex: 'notepad', 'spotify', 'chrome', 'calc')",
-            }
-        },
-        handler=_open_app,
+        params=[
+            ToolParam(
+                name="app_name",
+                type="string",
+                description="Nome do aplicativo a abrir (ex: 'notepad', 'spotify', 'chrome', 'calc')",
+            )
+        ],
+        func=_open_app,
     )
 
 
@@ -155,15 +185,19 @@ def make_set_timer() -> Tool:
             "Exemplos: 'coloca um timer de 25 minutos', 'me lembra em 10 minutos', "
             "'timer de 1h para o almoço'."
         ),
-        parameters={
-            "minutes": {
-                "type": "string",
-                "description": "Duração em minutos (pode ser decimal, ex: '25', '1.5', '90')",
-            },
-            "label": {
-                "type": "string",
-                "description": "Descrição opcional do timer (ex: 'Pausa Pomodoro', 'Almoço')",
-            },
-        },
-        handler=_set_timer,
+        params=[
+            ToolParam(
+                name="minutes",
+                type="string",
+                description="Duração em minutos (pode ser decimal, ex: '25', '1.5', '90')",
+            ),
+            ToolParam(
+                name="label",
+                type="string",
+                description="Descrição opcional do timer (ex: 'Pausa Pomodoro', 'Almoço')",
+                required=False,
+                default="",
+            ),
+        ],
+        func=_set_timer,
     )

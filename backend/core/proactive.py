@@ -52,6 +52,10 @@ class ProactiveMonitor:
             f"intervalo={self._check_interval}s, cooldown={self._cooldown}s"
         )
 
+    def set_enabled(self, value: bool) -> None:
+        """Liga/desliga o monitor proativo em runtime."""
+        self._enabled = value
+
     def mark_user_active(self) -> None:
         """Deve ser chamado pelo websocket a cada mensagem enviada pelo usuário."""
         self._last_user_msg = time.monotonic()

@@ -164,6 +164,11 @@ class Orchestrator:
             "- For run_powershell, write a complete PowerShell command.\n"
             "- For list_directory and read_file, use the full absolute path.\n"
             "- Use conversation history to resolve references like 'again', 'de novo', 'novamente'.\n"
+            "- open_url: use for ANY request to open a website, URL, or online service "
+            "(YouTube, Google, GitHub, Reddit, Twitter, Netflix, Twitch, etc.). "
+            "NEVER use open_file for websites. Pass only the domain or URL, not a file path.\n"
+            "- open_app: use for desktop applications/programs (Notepad, Spotify, Chrome, VS Code, etc.).\n"
+            "- set_timer: use when the user asks for a timer, countdown, or reminder with a time duration.\n"
         )
 
         raw = ""
