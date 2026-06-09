@@ -71,6 +71,10 @@ class ProactiveMonitor:
                 print(f"[KRIRK][proactive] Erro no loop: {type(e).__name__}: {e}")
 
     async def _tick(self) -> None:
+        # Respeita o toggle de runtime — desativado pelo usuário nas Configurações
+        if not self._enabled:
+            return
+
         now = time.monotonic()
 
         # 1. Verifica cooldown global

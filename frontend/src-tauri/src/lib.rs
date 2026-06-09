@@ -3,6 +3,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, WindowEvent,
 };
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[tauri::command]
 fn set_always_on_top(window: tauri::WebviewWindow, value: bool) {
@@ -86,6 +87,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             set_always_on_top,
@@ -106,7 +108,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &hide, &config, &sep, &quit])?;
 
             TrayIconBuilder::new()
-                .tooltip("KRIRK — Companion AI")
+                .tooltip("KRIRK — Companion AI  (Alt+K)")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -135,6 +137,20 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // ── Hotkey global Alt+K — mostra/oculta a janela principal ────────
+            app.handle().global_shortcut().on_shortcut("Alt+K", |app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Some(w) = app.get_webview_window("main") {
+                        if w.is_visible().unwrap_or(false) {
+                            let _ = w.hide();
+                            let _ = w.set_skip_taskbar(true);
+                        } else {
+                            show_main_window(app);
+                        }
+                    }
+                }
+            })?;
 
             Ok(())
         })
