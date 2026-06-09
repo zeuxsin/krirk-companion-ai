@@ -134,6 +134,29 @@ class KnowledgeGraphManager:
         ]
         return "\n".join(lines) if lines else None
 
+    # ── Exclusão ─────────────────────────────────────────────────────────────
+
+    def delete_relation(
+        self,
+        user_id: str,
+        entity_from: str,
+        relation: str,
+        entity_to: str,
+    ) -> None:
+        """Remove uma relação específica do grafo."""
+        with self._conn() as conn:
+            conn.execute(
+                """DELETE FROM kg_relations
+                   WHERE user_id=? AND entity_from=? AND relation=? AND entity_to=?""",
+                (user_id, entity_from, relation, entity_to),
+            )
+
+    def clear_all(self, user_id: str) -> None:
+        """Remove todas as entidades e relações do usuário."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM kg_entities  WHERE user_id=?", (user_id,))
+            conn.execute("DELETE FROM kg_relations WHERE user_id=?", (user_id,))
+
     # ── Estatísticas ─────────────────────────────────────────────────────────
 
     def get_stats(self, user_id: str) -> dict:

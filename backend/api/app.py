@@ -70,6 +70,51 @@ def create_app() -> FastAPI:
     async def memory_stats(user_id: str = "default"):
         return orchestrator.memory.get_stats(user_id)
 
+    @app.get("/api/memory")
+    async def get_memory(user_id: str = "default"):
+        """Retorna todos os dados de memória: stats, perfil, fatos e KG."""
+        stats = orchestrator.memory.get_stats(user_id)
+        kg_stats = orchestrator.memory.kg.get_stats(user_id)
+        stats["kg_entities"] = kg_stats["entities"]
+        stats["kg_relations"] = kg_stats["relations"]
+        return {
+            "stats":        stats,
+            "profile":      orchestrator.memory.get_profile(user_id),
+            "facts":        orchestrator.memory.get_facts(user_id, limit=200),
+            "kg_relations": orchestrator.memory.kg.get_relations(user_id, limit=500),
+        }
+
+    @app.put("/api/memory/profile")
+    async def update_profile(request: Request):
+        body = await request.json()
+        user_id = body.get("user_id", "default")
+        orchestrator.memory.update_profile(user_id, body["profile"])
+        return {"ok": True}
+
+    @app.delete("/api/memory/fact")
+    async def delete_fact(request: Request):
+        body = await request.json()
+        user_id = body.get("user_id", "default")
+        orchestrator.memory.delete_fact(user_id, body["fact"])
+        return {"ok": True}
+
+    @app.delete("/api/memory/kg-relation")
+    async def delete_kg_relation(request: Request):
+        body = await request.json()
+        user_id = body.get("user_id", "default")
+        orchestrator.memory.kg.delete_relation(
+            user_id,
+            body["entity_from"],
+            body["relation"],
+            body["entity_to"],
+        )
+        return {"ok": True}
+
+    @app.delete("/api/memory/all")
+    async def clear_memory(user_id: str = "default"):
+        orchestrator.memory.clear_all(user_id)
+        return {"ok": True}
+
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):
         await handle_websocket(websocket, client_id, orchestrator)

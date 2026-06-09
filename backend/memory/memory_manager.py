@@ -133,6 +133,27 @@ class MemoryManager:
                 "category": category,
             })
 
+    def delete_fact(self, user_id: str, fact: str) -> None:
+        """Remove um fato específico pelo texto."""
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM facts WHERE user_id=? AND fact=?",
+                (user_id, fact),
+            )
+
+    def clear_facts(self, user_id: str) -> None:
+        """Remove todos os fatos do usuário."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM facts WHERE user_id=?", (user_id,))
+
+    def clear_all(self, user_id: str) -> None:
+        """Apaga fatos, Knowledge Graph e perfil. Mantém histórico de mensagens."""
+        from backend.memory.profile_manager import DEFAULT_PROFILE
+        from copy import deepcopy
+        self.clear_facts(user_id)
+        self.kg.clear_all(user_id)
+        self.update_profile(user_id, deepcopy(DEFAULT_PROFILE))
+
     def get_facts(self, user_id: str, limit: int = 10) -> list[str]:
         with self._conn() as conn:
             rows = conn.execute(

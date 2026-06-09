@@ -1,6 +1,44 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 
-type SettingsTab = 'models' | 'personality' | 'appearance' | 'hardware'
+type SettingsTab = 'models' | 'personality' | 'memory' | 'appearance' | 'hardware'
+
+// ── Tipos de memória ──────────────────────────────────────────────────────────
+
+interface KGRelation {
+  entity_from: string
+  relation: string
+  entity_to: string
+  confidence: number
+}
+
+interface UserProfile {
+  nome: string
+  idade: string
+  profissao: string
+  cidade: string
+  interesses: string[]
+  projetos: string[]
+  ferramentas: string[]
+  objetivos: string[]
+  notas: string
+}
+
+interface MemoryStats {
+  total_messages: number
+  facts_stored: number
+  intimacy_level: number
+  first_seen: string | null
+  semantic_memories: number
+  kg_entities: number
+  kg_relations: number
+}
+
+interface MemoryData {
+  stats: MemoryStats
+  profile: UserProfile
+  facts: string[]
+  kg_relations: KGRelation[]
+}
 
 interface HardwareStats {
   cpu: number
@@ -460,6 +498,264 @@ function PersonalityTab() {
   )
 }
 
+// ── Aba Memória ───────────────────────────────────────────────────────────────
+
+const LIST_STYLE: React.CSSProperties = {
+  fontSize: 11, color: 'var(--color-krirk-text)',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
+  gap: 8,
+}
+
+const X_BTN: React.CSSProperties = {
+  flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+  color: 'rgba(255,255,255,0.25)', fontSize: 14, lineHeight: 1,
+  padding: '0 2px',
+  transition: 'color 0.15s',
+}
+
+function SectionHeader({ title, count }: { title: string; count?: number }) {
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 700, color: 'var(--color-krirk-muted)',
+      textTransform: 'uppercase', letterSpacing: '0.08em',
+      marginTop: 20, marginBottom: 10,
+    }}>
+      {title}{count !== undefined ? ` (${count})` : ''}
+    </div>
+  )
+}
+
+function MemoryTab() {
+  const [data, setData] = useState<MemoryData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  // Perfil local para edição
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [profileStatus, setProfileStatus] = useState<'idle'|'saving'|'saved'|'error'>('idle')
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/memory`)
+      if (!r.ok) { setError(true); return }
+      const d: MemoryData = await r.json()
+      setData(d)
+      setProfile(d.profile)
+      setError(false)
+    } catch { setError(true) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const deleteFact = async (fact: string) => {
+    await fetch(`${API}/api/memory/fact`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fact }),
+    })
+    load()
+  }
+
+  const deleteRelation = async (r: KGRelation) => {
+    await fetch(`${API}/api/memory/kg-relation`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entity_from: r.entity_from,
+        relation: r.relation,
+        entity_to: r.entity_to,
+      }),
+    })
+    load()
+  }
+
+  const saveProfile = async () => {
+    if (!profile) return
+    setProfileStatus('saving')
+    try {
+      const r = await fetch(`${API}/api/memory/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile }),
+      })
+      setProfileStatus(r.ok ? 'saved' : 'error')
+    } catch { setProfileStatus('error') }
+    setTimeout(() => setProfileStatus('idle'), 1500)
+  }
+
+  const clearAll = async () => {
+    if (!window.confirm('Apagar todos os fatos, relações e perfil? Esta ação não pode ser desfeita.')) return
+    await fetch(`${API}/api/memory/all`, { method: 'DELETE' })
+    load()
+  }
+
+  // Helper para campos CSV (interesses, ferramentas, etc.)
+  const listToCSV = (arr: string[]) => arr.join(', ')
+  const csvToList = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean)
+
+  const fieldStyle: React.CSSProperties = {
+    width: '100%', padding: '5px 8px', borderRadius: 5,
+    border: '1px solid var(--color-krirk-border)',
+    background: 'var(--color-krirk-surface)',
+    color: 'var(--color-krirk-text)', fontSize: 11, outline: 'none',
+    boxSizing: 'border-box',
+  }
+
+  if (loading) return (
+    <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 16 }}>
+      Carregando memórias…
+    </div>
+  )
+
+  if (error) return (
+    <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 12 }}>
+      ⚠️ Backend offline — inicie o servidor Python
+    </div>
+  )
+
+  const s = data!.stats
+
+  const formatDate = (iso: string | null) => {
+    if (!iso) return '—'
+    try { return new Date(iso).toLocaleDateString('pt-BR') } catch { return iso }
+  }
+
+  return (
+    <div>
+      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, color: 'var(--color-krirk-text)' }}>
+        Memória
+      </h3>
+
+      {/* ── Stats ── */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+      }}>
+        {[
+          { label: '💬 Mensagens',  value: s.total_messages },
+          { label: '📌 Fatos',      value: s.facts_stored },
+          { label: '🔗 Relações KG', value: s.kg_relations },
+          { label: '❤️ Intimidade', value: `${s.intimacy_level.toFixed(1)}` },
+        ].map(({ label, value }) => (
+          <div key={label} style={{
+            background: 'var(--color-krirk-surface)',
+            borderRadius: 8, padding: '8px 10px',
+            border: '1px solid var(--color-krirk-border)',
+          }}>
+            <div style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-krirk-text)' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginTop: 6 }}>
+        📅 Desde: {formatDate(s.first_seen)}
+      </div>
+
+      {/* ── Perfil ── */}
+      {profile && (
+        <>
+          <SectionHeader title="Perfil" />
+          {([
+            { key: 'nome',     label: 'Nome' },
+            { key: 'profissao', label: 'Profissão' },
+            { key: 'cidade',   label: 'Cidade' },
+          ] as const).map(({ key, label }) => (
+            <label key={key} style={{ display: 'block', marginBottom: 6 }}>
+              <span style={{ fontSize: 10, color: 'var(--color-krirk-muted)', display: 'block', marginBottom: 3 }}>{label}</span>
+              <input
+                value={(profile as any)[key] as string}
+                onChange={e => setProfile(p => p ? { ...p, [key]: e.target.value } : p)}
+                style={fieldStyle}
+              />
+            </label>
+          ))}
+          {([
+            { key: 'interesses',  label: 'Interesses (CSV)' },
+            { key: 'ferramentas', label: 'Ferramentas (CSV)' },
+            { key: 'projetos',    label: 'Projetos (CSV)' },
+          ] as const).map(({ key, label }) => (
+            <label key={key} style={{ display: 'block', marginBottom: 6 }}>
+              <span style={{ fontSize: 10, color: 'var(--color-krirk-muted)', display: 'block', marginBottom: 3 }}>{label}</span>
+              <input
+                value={listToCSV((profile as any)[key] as string[])}
+                onChange={e => setProfile(p => p ? { ...p, [key]: csvToList(e.target.value) } : p)}
+                style={fieldStyle}
+                placeholder="item1, item2, item3"
+              />
+            </label>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <SaveFeedback status={profileStatus} />
+            <button
+              onClick={saveProfile}
+              disabled={profileStatus === 'saving'}
+              style={{
+                padding: '6px 14px', borderRadius: 6, border: 'none',
+                background: 'rgba(99,102,241,0.3)', color: '#818cf8',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Salvar perfil
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── Fatos ── */}
+      <SectionHeader title="Fatos" count={data!.facts.length} />
+      {data!.facts.length === 0
+        ? <p style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhum fato registrado ainda.</p>
+        : data!.facts.map((fact, i) => (
+          <div key={i} style={LIST_STYLE}>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              • {fact}
+            </span>
+            <button style={X_BTN} title="Apagar" onClick={() => deleteFact(fact)}>×</button>
+          </div>
+        ))
+      }
+
+      {/* ── Knowledge Graph ── */}
+      <SectionHeader title="Knowledge Graph" count={data!.kg_relations.length} />
+      {data!.kg_relations.length === 0
+        ? <p style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhuma relação registrada ainda.</p>
+        : data!.kg_relations.map((rel, i) => (
+          <div key={i} style={LIST_STYLE}>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {rel.entity_from} → {rel.relation} → {rel.entity_to}
+            </span>
+            <button style={X_BTN} title="Apagar" onClick={() => deleteRelation(rel)}>×</button>
+          </div>
+        ))
+      }
+
+      {/* ── Zona de perigo ── */}
+      <div style={{
+        marginTop: 24, paddingTop: 16,
+        borderTop: '1px solid rgba(239,68,68,0.2)',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#ef4444', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          Zona de perigo
+        </div>
+        <button
+          onClick={clearAll}
+          style={{
+            padding: '7px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)',
+            background: 'rgba(239,68,68,0.1)', color: '#ef4444',
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          Apagar toda a memória
+        </button>
+        <p style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginTop: 6 }}>
+          Remove fatos, relações e perfil. O histórico de mensagens é mantido.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ── Aba Aparência (placeholder) ───────────────────────────────────────────────
 
 function AppearanceTab() {
@@ -481,6 +777,7 @@ function AppearanceTab() {
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'models',      label: 'Modelos',       icon: '🤖' },
   { id: 'personality', label: 'Personalidade', icon: '✨' },
+  { id: 'memory',      label: 'Memória',       icon: '🧠' },
   { id: 'appearance',  label: 'Aparência',     icon: '🎨' },
   { id: 'hardware',    label: 'Hardware',      icon: '💻' },
 ]
@@ -533,6 +830,7 @@ export function SettingsPage() {
       <main style={{ flex: 1, padding: 20, overflowY: 'auto' }}>
         {tab === 'models'      && <ModelsTab />}
         {tab === 'personality' && <PersonalityTab />}
+        {tab === 'memory'      && <MemoryTab />}
         {tab === 'appearance'  && <AppearanceTab />}
         {tab === 'hardware'    && <HardwareTab />}
       </main>
