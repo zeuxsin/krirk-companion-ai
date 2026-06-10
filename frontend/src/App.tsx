@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { Sidebar, AppMode } from './components/Sidebar'
 import { ChatMode } from './components/ChatMode'
+import { CodeMode } from './components/CodeMode'
 import { AvatarMode } from './components/AvatarMode'
 import { HudMode } from './components/HudMode'
 import { CompactHeader } from './components/CompactHeader'
@@ -41,7 +42,7 @@ async function openSettingsWindow() {
 }
 
 export default function App() {
-  const { connected, aiState, emotion, sendMessage, sendAudio, sendScreenshot, onEvent } = useWebSocket()
+  const { connected, aiState, emotion, sendMessage, sendCodeMessage, sendAudio, sendScreenshot, onEvent } = useWebSocket()
   const [mode, setMode] = useState<AppMode>('chat')
 
   // ── Estado de mensagens compartilhado ─────────────────────────────────────
@@ -237,15 +238,25 @@ export default function App() {
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <ChatMode
-          messages={messages}
-          addMsg={addMsg}
-          sendMessage={sendMessage}
-          sendAudio={sendAudio}
-          sendScreenshot={sendScreenshot}
-          connected={connected}
-          aiStateBusy={aiStateBusy}
-        />
+        {mode === 'code' ? (
+          <CodeMode
+            messages={messages}
+            addMsg={addMsg}
+            sendCodeMessage={sendCodeMessage}
+            connected={connected}
+            aiStateBusy={aiStateBusy}
+          />
+        ) : (
+          <ChatMode
+            messages={messages}
+            addMsg={addMsg}
+            sendMessage={sendMessage}
+            sendAudio={sendAudio}
+            sendScreenshot={sendScreenshot}
+            connected={connected}
+            aiStateBusy={aiStateBusy}
+          />
+        )}
       </main>
     </div>
   )

@@ -8,6 +8,7 @@ interface UseWebSocketReturn {
   aiState: AIState
   emotion: EmotionType
   sendMessage: (content: string) => void
+  sendCodeMessage: (content: string) => void
   sendAudio: (base64: string) => void
   sendScreenshot: (prompt: string) => void
   onEvent: (handler: (event: WSEvent) => void) => () => void
@@ -81,6 +82,10 @@ export function useWebSocket(): UseWebSocketReturn {
     wsRef.current?.send(JSON.stringify({ type: 'chat', content }))
   }, [])
 
+  const sendCodeMessage = useCallback((content: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'code_chat', content }))
+  }, [])
+
   const sendAudio = useCallback((base64: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'audio', data: base64 }))
   }, [])
@@ -94,5 +99,5 @@ export function useWebSocket(): UseWebSocketReturn {
     return () => handlersRef.current.delete(handler)
   }, [])
 
-  return { connected, aiState, emotion, sendMessage, sendAudio, sendScreenshot, onEvent }
+  return { connected, aiState, emotion, sendMessage, sendCodeMessage, sendAudio, sendScreenshot, onEvent }
 }

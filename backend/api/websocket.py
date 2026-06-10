@@ -96,6 +96,15 @@ async def handle_websocket(
                         orchestrator.update_profile_bg(content, last_response, client_id)
                     )
 
+            elif msg_type == "code_chat":
+                content = payload.get("content", "").strip()
+                if not content:
+                    continue
+                if _proactive_monitor:
+                    _proactive_monitor.mark_user_active()
+                async for event in orchestrator.process_code_chat(content, user_id=client_id):
+                    await manager.send(client_id, event)
+
             elif msg_type == "audio":
                 audio_data = payload.get("data", "")
                 if not audio_data:

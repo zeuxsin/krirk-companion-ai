@@ -2,12 +2,13 @@ import React from 'react'
 import { EmotionType, AIState } from '../types'
 import { EMOTION_COLOR } from '../utils/emotions'
 
-export type AppMode = 'chat' | 'sidebar' | 'avatar' | 'settings'
+export type AppMode = 'chat' | 'sidebar' | 'avatar' | 'code' | 'settings'
 
 const MODE_ITEMS: { id: AppMode; label: string; icon: string }[] = [
   { id: 'chat',     label: 'Chat',          icon: '💬' },
   { id: 'sidebar',  label: 'Sidebar',       icon: '🪟' },
   { id: 'avatar',   label: 'Avatar',        icon: '✨' },
+  { id: 'code',     label: 'Coder',         icon: '💻' },
   { id: 'settings', label: 'Configurações', icon: '⚙️' },
 ]
 

@@ -58,6 +58,36 @@ knowledge_graph:
   enabled: true
   max_relations_in_prompt: 25   # máximo de relações injetadas no system prompt
 
+# ── Providers de LLM (NVIDIA → Google → Cerebras → Ollama) ───────────────────
+# Chaves ficam no .env — aqui ficam apenas os modelos customizados (opcional)
+providers:
+  nvidia:
+    # Modelos verificados com latência < 2s no free tier (2026-06)
+    models:
+      chat:   "meta/llama-3.3-70b-instruct"          # 0.6s
+      tools:  "mistralai/mistral-small-4-119b-2603"  # 0.3s — MoE rápido para routing
+      code:   "nvidia/llama-3.3-nemotron-super-49b-v1"  # 0.9s
+      ocr:    "microsoft/phi-4-multimodal-instruct"  # não testado — fallback para ollama
+      vision: "meta/llama-3.2-11b-vision-instruct"   # vision capaz e leve
+      embed:  "nvidia/nv-embedqa-e5-v5"              # embedding rápido
+      safety: "meta/llama-guard-4-12b"
+  google:
+    models:
+      chat:  "gemma-4-31b-it"
+      tools: "gemma-4-31b-it"
+      code:  "gemma-4-31b-it"
+  cerebras:
+    models:
+      chat:  "llama3.1-70b"
+      tools: "llama3.1-8b"
+      code:  "llama3.1-70b"
+  ollama:
+    models:
+      chat:  "gemma3:4b"
+      tools: "qwen2.5-coder:7b"
+      code:  "qwen2.5-coder:7b"
+      embed: "nomic-embed-text"
+
 tools:
   enabled: true
   tool_model: "qwen2.5-coder:7b"   # modelo especializado para roteamento de ferramentas
@@ -85,4 +115,5 @@ tools:
     - open_url
     - open_app
     - set_timer
+    - execute_python   # executa snippets Python localmente (Modo Coder)
     # write_file — omitido intencionalmente (potencialmente destrutivo)

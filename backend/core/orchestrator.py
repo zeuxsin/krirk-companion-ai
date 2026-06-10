@@ -15,12 +15,78 @@ def _strip_reasoning(text: str) -> str:
     cleaned = _REASONING_RE.sub('', text)
     return re.sub(r'\n{3,}', '\n\n', cleaned).strip()
 
+
+_OPEN_TAGS  = ("<thought>", "<thinking>", "<think>", "<scratchpad>", "<reflection>")
+_CLOSE_TAGS = ("</thought>", "</thinking>", "</think>", "</scratchpad>", "</reflection>")
+
+async def _stream_strip_reasoning(
+    source: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    """
+    Filtra tokens durante o streaming, suprimindo blocos <thought>…</thought>.
+    Necessário quando o Google/Gemma é o provider — as thinking tokens chegam
+    como tokens normais e seriam exibidas ao usuário sem este filtro.
+    """
+    buf = ""
+    suppressed = False
+
+    async for token in source:
+        buf += token
+
+        while True:
+            low = buf.lower()
+
+            if suppressed:
+                # Procura tag de fechamento
+                found_close = False
+                for ctag in _CLOSE_TAGS:
+                    pos = low.find(ctag)
+                    if pos != -1:
+                        buf = buf[pos + len(ctag):]
+                        suppressed = False
+                        found_close = True
+                        break
+                if found_close:
+                    continue  # re-processa o restante do buffer
+                # Sem tag de fechamento — descarta tudo exceto possível início de ctag
+                tail = 20
+                buf = buf[-tail:] if len(buf) > tail else buf
+                break
+
+            else:
+                # Procura tag de abertura
+                found_open = False
+                for otag in _OPEN_TAGS:
+                    pos = low.find(otag)
+                    if pos != -1:
+                        # Emite o que vem antes da tag
+                        before = buf[:pos]
+                        if before:
+                            yield before
+                        buf = buf[pos + len(otag):]
+                        suppressed = True
+                        found_open = True
+                        break
+                if found_open:
+                    continue  # re-processa: pode já ter ctag no buffer
+                # Sem tag de abertura — emite tudo exceto possível início de otag
+                safe_len = len(buf) - 15
+                if safe_len > 0:
+                    yield buf[:safe_len]
+                    buf = buf[safe_len:]
+                break
+
+    # Flush final
+    if buf and not suppressed:
+        yield buf
+
 from backend.core.personality import PersonalitySystem
 from backend.core.state import AIState, AISystemState
 from backend.memory.memory_manager import MemoryManager
 from backend.emotions.emotion_engine import EmotionEngine
 from backend.voice.tts import TTSEngine
 from backend.voice.stt import STTEngine
+from backend.providers.router import build_router, ProviderRouter
 
 _HOME = str(Path.home()).replace("\\", "/")
 
@@ -44,6 +110,9 @@ class Orchestrator:
         self.tts = TTSEngine(config["tts"])
         self.stt = STTEngine(config["stt"])
 
+        # ── Provider router (NVIDIA → Google → Cerebras → Ollama) ────────────
+        self.router: ProviderRouter = build_router(config)
+
         # ── Sistema de ferramentas (Fase 4 — dual-model) ──────────────────────
         self._tool_cfg = config.get("tools", {"enabled": False})
         self.tool_registry = None
@@ -62,62 +131,64 @@ class Orchestrator:
             except Exception as e:
                 print(f"[KRIRK][tools] Falha ao inicializar ferramentas: {e}")
 
-    # ── Streaming com o modelo principal (gemma3 — chat/personalidade) ────────
+    # ── Streaming helpers (delegam ao ProviderRouter) ─────────────────────────
 
     async def _stream_ollama(
         self,
         messages: list[dict],
         images: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
-        try:
-            import ollama
-            client = ollama.AsyncClient(host=self._ollama_config["base_url"])
-
-            if images:
+        """Chat com personalidade — usa task 'chat' no router."""
+        if images:
+            # Visão ainda vai direto no Ollama (suporte multimodal local)
+            try:
+                import ollama
+                client = ollama.AsyncClient(host=self._ollama_config["base_url"])
                 msgs = [m.copy() for m in messages]
                 msgs[-1] = {**msgs[-1], "images": images}
-            else:
-                msgs = messages
+                async for chunk in await client.chat(
+                    model=self._ollama_config["model"],
+                    messages=msgs,
+                    stream=True,
+                    options={
+                        "temperature": self._ollama_config["temperature"],
+                        "num_predict": self._ollama_config["max_tokens"],
+                    }
+                ):
+                    content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+            except Exception as e:
+                yield f"[Erro de visão: {e}]"
+            return
 
-            async for chunk in await client.chat(
-                model=self._ollama_config["model"],
-                messages=msgs,
-                stream=True,
-                options={
-                    "temperature": self._ollama_config["temperature"],
-                    "num_predict": self._ollama_config["max_tokens"],
-                }
-            ):
-                content = chunk.get("message", {}).get("content", "")
-                if content:
-                    yield content
-        except ImportError:
-            yield "[Erro: pacote 'ollama' não instalado. Execute: pip install ollama]"
-        except Exception as e:
-            yield f"[Erro ao conectar com Ollama: {e}. Certifique-se que o Ollama está rodando.]"
+        raw_stream = self.router.stream(
+            "chat", messages,
+            temperature=self._ollama_config["temperature"],
+            max_tokens=self._ollama_config["max_tokens"],
+        )
+        async for token in _stream_strip_reasoning(raw_stream):
+            yield token
 
-    # ── Streaming com o modelo de tools (qwen2.5-coder — roteamento estruturado)
+    async def _stream_ollama_code(self, messages: list[dict]) -> AsyncGenerator[str, None]:
+        """Modo Coder — usa task 'code' no router."""
+        raw_stream = self.router.stream(
+            "code", messages,
+            temperature=0.4,
+            max_tokens=self._ollama_config["max_tokens"],
+        )
+        async for token in _stream_strip_reasoning(raw_stream):
+            yield token
 
     async def _stream_ollama_tool(self, messages: list[dict]) -> AsyncGenerator[str, None]:
-        """Usa o modelo especializado em tools para gerar JSON estruturado."""
-        try:
-            import ollama
-            tool_model = self._tool_cfg.get("tool_model", self._ollama_config["model"])
-            client = ollama.AsyncClient(host=self._ollama_config["base_url"])
-            async for chunk in await client.chat(
-                model=tool_model,
-                messages=messages,
-                stream=True,
-                options={
-                    "temperature": 0.1,    # baixa temperatura para JSON preciso
-                    "num_predict": 256,    # resposta curta — apenas o JSON de decisão
-                }
-            ):
-                content = chunk.get("message", {}).get("content", "")
-                if content:
-                    yield content
-        except Exception as e:
-            print(f"[KRIRK][tools] _stream_ollama_tool falhou: {e}")
+        """Tool routing — usa task 'tools' no router (DeepSeek v4 Pro no NVIDIA)."""
+        raw = await self.router.complete(
+            "tools", messages,
+            temperature=0.1,
+            max_tokens=256,
+        )
+        if raw:
+            yield raw
 
     # ── Decisão de tool (Fase 1) ──────────────────────────────────────────────
 
@@ -171,13 +242,12 @@ class Orchestrator:
             "- set_timer: use when the user asks for a timer, countdown, or reminder with a time duration.\n"
         )
 
-        raw = ""
-        async for token in self._stream_ollama_tool([
-            {"role": "user", "content": planning_prompt}
-        ]):
-            raw += token
-            if len(raw) > 512:
-                break
+        raw = await self.router.complete(
+            "tools",
+            [{"role": "user", "content": planning_prompt}],
+            temperature=0.1,
+            max_tokens=256,
+        )
 
         raw = raw.strip()
         print(f"[KRIRK][tools] Decisão do roteador: {raw[:150]}")
@@ -365,6 +435,98 @@ class Orchestrator:
         }
         yield {"type": "status", "state": "idle"}
 
+    # ── Modo Coder ────────────────────────────────────────────────────────────
+
+    async def process_code_chat(
+        self,
+        message: str,
+        user_id: str = "default",
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Pipeline do Modo Coder:
+        - Usa qwen2.5-coder diretamente (sem personalidade gemma3)
+        - Suporta execute_python via roteamento normal
+        - Sem TTS, sem extração de fatos/perfil/KG
+        """
+        self.state.set(AISystemState.THINKING)
+        yield {"type": "status", "state": "thinking"}
+
+        # Histórico recente do usuário (mesmo pool do chat normal)
+        history = self.memory.get_recent_messages(
+            user_id,
+            limit=self._config["memory"]["short_term_limit"]
+        )
+
+        system = (
+            "You are an expert programming assistant. "
+            "Respond in Brazilian Portuguese (pt-BR). "
+            "Be technical, concise and direct. "
+            "Use markdown code blocks with language tags (```python, ```javascript, etc). "
+            "When asked to execute or test code, use the execute_python tool. "
+            "Explain errors clearly and suggest fixes."
+        )
+
+        # ── Tool routing (mesmo _decide_tool do chat normal) ──────────────────
+        tool_result_context = ""
+        if self._tool_cfg.get("enabled", False) and self.tool_executor:
+            tool_decision = await self._decide_tool(message, history)
+
+            if tool_decision:
+                tool_name = tool_decision.get("tool", "ferramenta")
+                self.state.set(AISystemState.EXECUTING)
+                yield {"type": "status", "state": "executing"}
+                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(tool_decision)}
+
+                result = await self.tool_executor.execute_from_json(
+                    json.dumps(tool_decision)
+                )
+                print(f"[KRIRK][code] {tool_name} → {result[:150]}")
+                yield {"type": "tool_result", "tool": tool_name, "result": result}
+                tool_result_context = result
+
+        # ── Monta contexto para qwen2.5-coder ────────────────────────────────
+        llm_messages = [{"role": "system", "content": system}]
+
+        # Apenas últimas 8 msgs do histórico (foco no contexto imediato)
+        for m in history[-8:]:
+            if m["role"] in ("user", "assistant"):
+                llm_messages.append({"role": m["role"], "content": m["content"]})
+
+        llm_messages.append({"role": "user", "content": message})
+
+        if tool_result_context:
+            llm_messages.append({
+                "role": "assistant",
+                "content": f"Resultado da execução:\n```\n{tool_result_context}\n```",
+            })
+            llm_messages.append({
+                "role": "user",
+                "content": "Explique o resultado acima de forma clara e objetiva.",
+            })
+
+        # Salva mensagem do usuário na memória (mesma base de dados)
+        self.memory.save_message(user_id, "user", message)
+
+        self.state.set(AISystemState.SPEAKING)
+        yield {"type": "status", "state": "speaking"}
+
+        full_response = ""
+        async for token in self._stream_ollama_code(llm_messages):
+            full_response += token
+            yield {"type": "token", "content": token}
+
+        clean_response = _strip_reasoning(full_response)
+        self.memory.save_message(user_id, "assistant", clean_response)
+
+        self.state.set(AISystemState.IDLE)
+        yield {
+            "type": "response_complete",
+            "content": clean_response,
+            "emotion": "neutral",
+            "audio": None,   # Sem TTS no Modo Coder
+        }
+        yield {"type": "status", "state": "idle"}
+
     async def process_audio(
         self,
         audio_b64: str,
@@ -483,7 +645,6 @@ class Orchestrator:
         e salva em conversation_summaries para o próximo turno.
         """
         try:
-            import ollama
             text = "\n".join(
                 f"{m['role'].upper()}: {m['content']}" for m in history
             )
@@ -493,17 +654,15 @@ class Orchestrator:
                 "sobre o usuário. Seja compacto e objetivo.\n\n"
                 + text
             )
-            client = ollama.AsyncClient(host=self._ollama_config["base_url"])
-            resp = await client.chat(
-                model=self._tool_cfg.get("tool_model", self._ollama_config["model"]),
-                messages=[{"role": "user", "content": prompt}],
-                options={"temperature": 0.1, "num_predict": 512},
+            summary = await self.router.complete(
+                "tools",
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=512,
             )
-            summary = resp["message"]["content"].strip()
+            summary = summary.strip()
             self.memory.save_summary(user_id, summary, len(history))
-            print(
-                f"[KRIRK][context] Resumo gerado: {len(history)} msgs → {len(summary)} chars"
-            )
+            print(f"[KRIRK][context] Resumo gerado: {len(history)} msgs → {len(summary)} chars")
         except Exception as e:
             print(f"[KRIRK][context] Erro ao gerar resumo: {e}")
 

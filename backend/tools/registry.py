@@ -139,6 +139,14 @@ def build_default_registry(config: dict, memory=None) -> ToolRegistry:
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar desktop_tools: {e}")
 
+    # ── Tool de execução de código Python ────────────────────────────────────
+    try:
+        from backend.tools.builtin.code_tools import make_execute_python
+        if "execute_python" in whitelist:
+            registry.register(make_execute_python())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar code_tools: {e}")
+
     # ── Tool de busca na memória semântica ───────────────────────────────────
     if memory is not None:
         try:
