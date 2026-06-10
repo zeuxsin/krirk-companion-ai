@@ -218,6 +218,18 @@ class Orchestrator:
             user_id,
             limit=self._config["memory"]["short_term_limit"]
         )
+
+        # Context management: recorta histórico longo e recupera resumo salvo
+        ctx_cfg = self._config.get("context_management", {})
+        history, conv_summary = self._trim_history(user_id, history)
+
+        # Dispara resumo background se o histórico ainda está acima de 80% do limite
+        if ctx_cfg.get("enabled", True):
+            max_hist = ctx_cfg.get("max_history_tokens", 3000)
+            total_tok = sum(self._estimate_tokens(m["content"]) for m in history)
+            if total_tok > max_hist * 0.8:
+                asyncio.create_task(self._summarize_history_bg(user_id, history))
+
         facts = self.memory.get_facts(user_id, limit=8)
 
         # Memórias semânticas relevantes via ChromaDB
@@ -270,6 +282,7 @@ class Orchestrator:
             user_facts=facts if facts else None,
             semantic_memories=semantic_memories if semantic_memories else None,
             knowledge_graph=kg_text,
+            conversation_summary=conv_summary,
         )
 
         llm_messages = [{"role": "system", "content": system_prompt}]
@@ -429,6 +442,70 @@ class Orchestrator:
             "audio": audio_b64,
         }
         yield {"type": "status", "state": "idle"}
+
+    # ── Context Management ────────────────────────────────────────────────────
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimativa rápida de tokens: ~4 chars por token (PT-BR + código)."""
+        return max(1, len(text) // 4)
+
+    def _trim_history(
+        self,
+        user_id: str,
+        history: list[dict],
+    ) -> tuple[list[dict], str | None]:
+        """
+        Se o histórico cabe no orçamento de tokens → retorna inteiro, sem resumo.
+        Caso contrário → mantém as últimas `keep_recent` mensagens + recupera resumo salvo.
+        """
+        cfg = self._config.get("context_management", {})
+        if not cfg.get("enabled", True):
+            return history, None
+
+        max_hist = cfg.get("max_history_tokens", 3000)
+        keep = cfg.get("keep_recent", 8)
+
+        total_tokens = sum(self._estimate_tokens(m["content"]) for m in history)
+        if total_tokens <= max_hist:
+            return history, None
+
+        summary = self.memory.get_summary(user_id)
+        trimmed = history[-keep:]
+        return trimmed, summary
+
+    async def _summarize_history_bg(
+        self,
+        user_id: str,
+        history: list[dict],
+    ) -> None:
+        """
+        Background task: resume o histórico completo via qwen2.5-coder
+        e salva em conversation_summaries para o próximo turno.
+        """
+        try:
+            import ollama
+            text = "\n".join(
+                f"{m['role'].upper()}: {m['content']}" for m in history
+            )
+            prompt = (
+                "Resuma a seguinte conversa em 3-5 frases concisas em português. "
+                "Foque nos tópicos discutidos, decisões tomadas e fatos importantes "
+                "sobre o usuário. Seja compacto e objetivo.\n\n"
+                + text
+            )
+            client = ollama.AsyncClient(host=self._ollama_config["base_url"])
+            resp = await client.chat(
+                model=self._tool_cfg.get("tool_model", self._ollama_config["model"]),
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.1, "num_predict": 512},
+            )
+            summary = resp["message"]["content"].strip()
+            self.memory.save_summary(user_id, summary, len(history))
+            print(
+                f"[KRIRK][context] Resumo gerado: {len(history)} msgs → {len(summary)} chars"
+            )
+        except Exception as e:
+            print(f"[KRIRK][context] Erro ao gerar resumo: {e}")
 
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """

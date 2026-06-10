@@ -75,6 +75,13 @@ class MemoryManager:
                     last_seen TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS conversation_summaries (
+                    user_id          TEXT PRIMARY KEY,
+                    summary          TEXT NOT NULL,
+                    messages_covered INTEGER DEFAULT 0,
+                    updated_at       TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
             """)
@@ -197,6 +204,30 @@ class MemoryManager:
                      intimacy_level = MIN(100.0, MAX(0.0, intimacy_level + ?))""",
                 (user_id, delta, delta)
             )
+
+    def save_summary(self, user_id: str, summary: str, messages_covered: int) -> None:
+        """Persiste o resumo da conversa (sobrescreve o anterior)."""
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO conversation_summaries
+                       (user_id, summary, messages_covered, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                       summary = excluded.summary,
+                       messages_covered = excluded.messages_covered,
+                       updated_at = excluded.updated_at""",
+                (user_id, summary, messages_covered, now),
+            )
+
+    def get_summary(self, user_id: str) -> str | None:
+        """Retorna o último resumo de conversa salvo, ou None se não existir."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT summary FROM conversation_summaries WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return row["summary"] if row else None
 
     def get_stats(self, user_id: str) -> dict:
         raw = self._get_raw_profile(user_id)

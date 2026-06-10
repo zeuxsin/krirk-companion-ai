@@ -49,6 +49,11 @@ proactive:
   user_idle_threshold: 60  # segundos de inatividade do usuário antes de comentar
   spotify_enabled: true    # detectar troca de música no Spotify
 
+context_management:
+  enabled: true
+  max_history_tokens: 3000   # acima disto, recorta histórico e usa resumo salvo
+  keep_recent: 8             # mensagens recentes sempre mantidas verbatim
+
 knowledge_graph:
   enabled: true
   max_relations_in_prompt: 25   # máximo de relações injetadas no system prompt
