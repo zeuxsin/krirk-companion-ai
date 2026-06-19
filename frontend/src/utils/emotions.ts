@@ -6,40 +6,100 @@
 import type { EmotionType, AIState } from '../types'
 
 export const EMOTION_TO_IMG: Record<EmotionType, string> = {
-  neutral:    'neutro',
-  happy:      'animada',
-  excited:    'surpresa',
-  thoughtful: 'pensando',
-  curious:    'curiosa',
-  concerned:  'cansada',
-  playful:    'animada',
-  angry:      'irritada',
-  confused:   'confusa',
+  // Emoções originais (inglês)
+  neutral:       'neutro',
+  happy:         'animada',
+  excited:       'surpresa',
+  thoughtful:    'pensando',
+  curious:       'curiosa',
+  concerned:     'cansada',
+  playful:       'animada',
+  angry:         'irritada',
+  confused:      'confusa',
+  // Emoções expandidas (português) — fallback para neutra enquanto imagens não existem
+  neutra:        'neutra',
+  feliz:         'feliz',
+  empolgada:     'empolgada',
+  triste:        'triste',
+  zangada:       'zangada',
+  surpresa:      'surpresa',
+  assustada:     'assustada',
+  envergonhada:  'envergonhada',
+  timida:        'timida',
+  irritada:      'irritada',
+  curiosa:       'curiosa',
+  concentrada:   'concentrada',
+  orgulhosa:     'orgulhosa',
+  cansada:       'cansada',
+  determinada:   'determinada',
+  codando:       'codando',
+  jogando:       'jogando',
+  tranquila:     'tranquila',
 }
 
 export const EMOTION_COLOR: Record<EmotionType, string> = {
-  neutral:    '#71717a',
-  happy:      '#a78bfa',
-  excited:    '#f59e0b',
-  thoughtful: '#60a5fa',
-  curious:    '#34d399',
-  concerned:  '#f87171',
-  playful:    '#fb923c',
-  angry:      '#ef4444',
-  confused:   '#c084fc',
+  // Originais
+  neutral:       '#71717a',
+  happy:         '#a78bfa',
+  excited:       '#f59e0b',
+  thoughtful:    '#60a5fa',
+  curious:       '#34d399',
+  concerned:     '#f87171',
+  playful:       '#fb923c',
+  angry:         '#ef4444',
+  confused:      '#c084fc',
+  // Expandidas
+  neutra:        '#71717a',
+  feliz:         '#a78bfa',
+  empolgada:     '#f59e0b',
+  triste:        '#60a5fa',
+  zangada:       '#ef4444',
+  surpresa:      '#fbbf24',
+  assustada:     '#f87171',
+  envergonhada:  '#fb7185',
+  timida:        '#e879f9',
+  irritada:      '#f97316',
+  curiosa:       '#34d399',
+  concentrada:   '#38bdf8',
+  orgulhosa:     '#a3e635',
+  cansada:       '#94a3b8',
+  determinada:   '#fb923c',
+  codando:       '#4ade80',
+  jogando:       '#f472b6',
+  tranquila:     '#67e8f9',
 }
 
 /** Animação CSS aplicada ao avatar quando AIState === 'idle'. */
 export const EMOTION_ANIM: Record<EmotionType, string> = {
-  neutral:    'anim-float',         // balanço neutro padrão
-  happy:      'anim-bounce',        // salto suave
-  excited:    'anim-bounce-fast',   // salto rápido e alto
-  thoughtful: 'anim-sway',          // balanço pensativo
-  curious:    'anim-lean',          // inclina para frente
-  concerned:  'anim-droop',         // desce pesado
-  playful:    'anim-wiggle',        // balança de lado
-  angry:      'anim-shake',         // tremida rápida
-  confused:   'anim-wobble',        // oscila irregular
+  // Originais
+  neutral:       'anim-float',
+  happy:         'anim-bounce',
+  excited:       'anim-bounce-fast',
+  thoughtful:    'anim-sway',
+  curious:       'anim-lean',
+  concerned:     'anim-droop',
+  playful:       'anim-wiggle',
+  angry:         'anim-shake',
+  confused:      'anim-wobble',
+  // Expandidas
+  neutra:        'anim-float',
+  feliz:         'anim-bounce',
+  empolgada:     'anim-bounce-fast',
+  triste:        'anim-droop',
+  zangada:       'anim-shake',
+  surpresa:      'anim-wobble',
+  assustada:     'anim-shake',
+  envergonhada:  'anim-sway',
+  timida:        'anim-sway',
+  irritada:      'anim-shake',
+  curiosa:       'anim-lean',
+  concentrada:   'anim-sway',
+  orgulhosa:     'anim-float',
+  cansada:       'anim-droop',
+  determinada:   'anim-bounce',
+  codando:       'anim-sway',
+  jogando:       'anim-wiggle',
+  tranquila:     'anim-float',
 }
 
 /**
@@ -69,4 +129,14 @@ export function avatarSrc(emotion: EmotionType): string {
 /** Retorna o src SVG de fallback. */
 export function avatarFallback(emotion: EmotionType): string {
   return `/avatar/${EMOTION_TO_IMG[emotion] ?? 'neutro'}.svg`
+}
+
+/**
+ * Retorna src do avatar de chat (pasta separada /avatar/chat/).
+ * Ordem de prioridade: /avatar/chat/{nome}.png → /avatar/{nome}.png → /avatar/neutra.png
+ * O componente AvatarChatImg trata o fallback com onError.
+ */
+export function avatarChatSrc(emotion: EmotionType): string {
+  const name = EMOTION_TO_IMG[emotion] ?? 'neutra'
+  return `/avatar/chat/${name}.png`
 }

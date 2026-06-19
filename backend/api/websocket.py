@@ -133,6 +133,15 @@ async def handle_websocket(
                 async for event in orchestrator.process_screenshot(prompt, user_id=client_id):
                     await manager.send(client_id, event)
 
+            elif msg_type == "image_chat":
+                image_b64 = payload.get("data", "")
+                if not image_b64:
+                    continue
+                if _proactive_monitor:
+                    _proactive_monitor.mark_user_active()
+                async for event in orchestrator.process_image_chat(image_b64, user_id=client_id):
+                    await manager.send(client_id, event)
+
             elif msg_type == "memory_stats":
                 stats = orchestrator.memory.get_stats(client_id)
                 await manager.send(client_id, {"type": "memory_stats", **stats})

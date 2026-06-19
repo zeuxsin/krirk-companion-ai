@@ -149,16 +149,6 @@ export function ChatWindow({ sendMessage, onEvent, connected, aiStateBusy }: Pro
     inputRef.current?.focus()
   }, [input, connected, aiStateBusy, addMessage, sendMessage])
 
-  // Voz: transcrição já chega como texto, envia direto
-  const handleTranscript = useCallback((text: string) => {
-    addMessage({
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    })
-    sendMessage(text)
-  }, [addMessage, sendMessage])
 
   // Erros do VoiceButton exibidos como mensagem de sistema
   const handleVoiceError = useCallback((msg: string) => {
@@ -214,7 +204,7 @@ export function ChatWindow({ sendMessage, onEvent, connected, aiStateBusy }: Pro
         background: '#18181b',
       }}>
         <VoiceButton
-          onTranscript={handleTranscript}
+          sendAudio={(_b64) => { /* legado — ChatWindow não transmite áudio */ }}
           onError={handleVoiceError}
           disabled={!connected || aiStateBusy}
         />

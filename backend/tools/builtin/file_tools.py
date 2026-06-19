@@ -10,6 +10,34 @@ from backend.tools.base import Tool, ToolParam
 
 _HOME = Path.home()
 
+_PATH_ALIASES: dict[str, Path] = {
+    "desktop":           _HOME / "Desktop",
+    "área de trabalho":  _HOME / "Desktop",
+    "area de trabalho":  _HOME / "Desktop",
+    "documentos":        _HOME / "Documents",
+    "documents":         _HOME / "Documents",
+    "downloads":         _HOME / "Downloads",
+    "imagens":           _HOME / "Pictures",
+    "pictures":          _HOME / "Pictures",
+    "músicas":           _HOME / "Music",
+    "music":             _HOME / "Music",
+    "vídeos":            _HOME / "Videos",
+    "videos":            _HOME / "Videos",
+}
+
+
+def _resolve_aliases(path_str: str) -> str:
+    """Resolve atalhos de caminho como 'Desktop' ou 'Área de Trabalho'."""
+    key = path_str.strip().lower()
+    if key in _PATH_ALIASES:
+        return str(_PATH_ALIASES[key])
+    # Prefixo: "desktop/arquivo.txt" → home/Desktop/arquivo.txt
+    for alias, real in _PATH_ALIASES.items():
+        if key.startswith(alias + "/") or key.startswith(alias + "\\"):
+            remainder = path_str[len(alias):].lstrip("/\\")
+            return str(real / remainder)
+    return path_str
+
 
 def _safe_path(path_str: str) -> Path | None:
     """
@@ -31,7 +59,7 @@ def _safe_path(path_str: str) -> Path | None:
 # ── read_file ─────────────────────────────────────────────────────────────────
 
 async def _read_file(path: str, max_lines: int = 100) -> str:
-    safe = _safe_path(path)
+    safe = _safe_path(_resolve_aliases(path))
     if safe is None:
         return f"[Erro] Caminho não permitido (deve estar dentro de {_HOME}): {path}"
     if not safe.exists():
@@ -64,7 +92,7 @@ def make_read_file() -> Tool:
 # ── list_directory ─────────────────────────────────────────────────────────────
 
 async def _list_directory(path: str) -> str:
-    safe = _safe_path(path)
+    safe = _safe_path(_resolve_aliases(path))
     if safe is None:
         return f"[Erro] Caminho não permitido: {path}"
     if not safe.exists():
@@ -108,7 +136,7 @@ def make_list_directory() -> Tool:
 # ── search_files ───────────────────────────────────────────────────────────────
 
 async def _search_files(directory: str, pattern: str) -> str:
-    safe = _safe_path(directory)
+    safe = _safe_path(_resolve_aliases(directory))
     if safe is None:
         return f"[Erro] Diretório não permitido: {directory}"
     if not safe.exists():
@@ -147,7 +175,7 @@ def make_search_files() -> Tool:
 # Desativado na whitelist padrão — usar com cautela
 
 async def _write_file(path: str, content: str) -> str:
-    safe = _safe_path(path)
+    safe = _safe_path(_resolve_aliases(path))
     if safe is None:
         return f"[Erro] Caminho não permitido (deve estar dentro de {_HOME}): {path}"
     try:

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { Sidebar, AppMode } from './components/Sidebar'
 import { ChatMode } from './components/ChatMode'
@@ -42,24 +42,47 @@ async function openSettingsWindow() {
 }
 
 export default function App() {
-  const { connected, aiState, emotion, sendMessage, sendCodeMessage, sendAudio, sendScreenshot, onEvent } = useWebSocket()
+  const { connected, aiState, emotion, sendMessage: _sendMessage, sendCodeMessage: _sendCodeMessage, sendAudio, sendScreenshot, sendImageMessage, onEvent } = useWebSocket()
+
+  // Wrappers que registram qual sessão está ativa antes de enviar
+  const sendMessage = useCallback((content: string) => {
+    activeSessionRef.current = 'chat'
+    _sendMessage(content)
+  }, [_sendMessage])
+
+  const sendCodeMessage = useCallback((content: string) => {
+    activeSessionRef.current = 'code'
+    _sendCodeMessage(content)
+  }, [_sendCodeMessage])
   const [mode, setMode] = useState<AppMode>('chat')
 
-  // ── Estado de mensagens compartilhado ─────────────────────────────────────
-  // Fica no App para sobreviver a trocas de modo (Chat ↔ Sidebar ↔ Avatar)
-  const [messages, setMessages] = useState<Message[]>([])
-  const streamingIdRef = useRef<string | null>(null)
+  // ── Estado de mensagens — chat e coder têm históricos separados ─────────
+  const [messages,     setMessages]     = useState<Message[]>([])
+  const [codeMessages, setCodeMessages] = useState<Message[]>([])
+  // Qual sessão está recebendo tokens agora ('chat' | 'code')
+  const activeSessionRef = useRef<'chat' | 'code'>('chat')
+  const streamingIdRef   = useRef<string | null>(null)
 
   const addMsg = useCallback((msg: Message) => {
+    if (activeSessionRef.current === 'code') {
+      setCodeMessages(p => [...p, msg])
+    } else {
+      setMessages(p => [...p, msg])
+    }
+  }, [])
+
+  const addChatMsg = useCallback((msg: Message) => {
     setMessages(p => [...p, msg])
   }, [])
 
   const appendToken = useCallback((id: string, token: string) => {
-    setMessages(p => p.map(m => m.id === id ? { ...m, content: m.content + token } : m))
+    const setter = activeSessionRef.current === 'code' ? setCodeMessages : setMessages
+    setter(p => p.map(m => m.id === id ? { ...m, content: m.content + token } : m))
   }, [])
 
   const finalizeMsg = useCallback((id: string, emotion?: string) => {
-    setMessages(p => p.map(m =>
+    const setter = activeSessionRef.current === 'code' ? setCodeMessages : setMessages
+    setter(p => p.map(m =>
       m.id === id ? { ...m, isStreaming: false, emotion: emotion as never } : m
     ))
   }, [])
@@ -75,13 +98,15 @@ export default function App() {
             role: m.role as 'user' | 'assistant',
             content: m.content,
             timestamp: new Date(),
+            isProactive: Boolean(m.is_proactive),
           })))
         }
         // Sem mensagem de saudação — histórico fala por si
         return
       }
       if (ev.type === 'transcription' && ev.content) {
-        addMsg({ id: `user-${Date.now()}`, role: 'user', content: ev.content, timestamp: new Date() })
+        // Transcrições de voz sempre vão para o chat
+        setMessages(p => [...p, { id: `user-${Date.now()}`, role: 'user', content: ev.content!, timestamp: new Date() }])
         return
       }
       if (ev.type === 'token' && ev.content) {
@@ -109,7 +134,8 @@ export default function App() {
         return
       }
       if (ev.type === 'proactive_comment' && ev.content) {
-        addMsg({
+        // Comentários proativos sempre no chat
+        addChatMsg({
           id: `proactive-${Date.now()}`,
           role: 'assistant',
           content: ev.content,
@@ -132,6 +158,7 @@ export default function App() {
         return
       }
       if (ev.type === 'tool_call' && ev.tool) {
+        // Tool calls seguem a sessão ativa
         addMsg({
           id: `tool-${Date.now()}`,
           role: 'tool',
@@ -143,7 +170,8 @@ export default function App() {
         return
       }
       if (ev.type === 'tool_result') {
-        setMessages(p => {
+        const setter = activeSessionRef.current === 'code' ? setCodeMessages : setMessages
+        setter(p => {
           // Encontra a última mensagem de tool em execução e atualiza
           const idx = [...p].reverse().findIndex(m => m.role === 'tool' && m.isRunning)
           if (idx === -1) return p
@@ -155,13 +183,14 @@ export default function App() {
         return
       }
       if (ev.type === 'screenshot_taken' && ev.thumbnail) {
-        addMsg({
+        // Screenshots sempre no chat
+        setMessages(p => [...p, {
           id: `screenshot-${Date.now()}`,
           role: 'assistant',
           content: '',
           thumbnail: `data:image/jpeg;base64,${ev.thumbnail}`,
           timestamp: new Date(),
-        })
+        }])
         return
       }
       if (ev.type === 'error' && ev.message) {
@@ -207,6 +236,7 @@ export default function App() {
             connected={connected}
             aiStateBusy={aiStateBusy}
             sendMessage={sendMessage}
+            sendAudio={sendAudio}
           />
         )}
 
@@ -240,7 +270,7 @@ export default function App() {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {mode === 'code' ? (
           <CodeMode
-            messages={messages}
+            messages={codeMessages}
             addMsg={addMsg}
             sendCodeMessage={sendCodeMessage}
             connected={connected}
@@ -253,6 +283,7 @@ export default function App() {
             sendMessage={sendMessage}
             sendAudio={sendAudio}
             sendScreenshot={sendScreenshot}
+            sendImageMessage={sendImageMessage}
             connected={connected}
             aiStateBusy={aiStateBusy}
           />

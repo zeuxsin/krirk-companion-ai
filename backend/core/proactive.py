@@ -250,7 +250,7 @@ class ProactiveMonitor:
 
         # Salva na memória como mensagem da assistente
         try:
-            self._orchestrator.memory.save_message("default", "assistant", comment, emotion=new_emotion)
+            self._orchestrator.memory.save_message("default", "assistant", comment, emotion=new_emotion, is_proactive=True)
         except Exception:
             pass
 

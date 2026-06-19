@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { EmotionType, AIState, Message } from '../types'
 import { VoiceButton } from './VoiceButton'
 import { EMOTION_COLOR, avatarAnimClass, avatarSrc, avatarFallback } from '../utils/emotions'
@@ -11,9 +11,10 @@ interface Props {
   connected: boolean
   aiStateBusy: boolean
   sendMessage: (text: string) => void
+  sendAudio?: (b64Wav: string) => void
 }
 
-export function HudMode({ messages, addMsg, emotion, aiState, connected, aiStateBusy, sendMessage }: Props) {
+export function HudMode({ messages, addMsg, emotion, aiState, connected, aiStateBusy, sendMessage, sendAudio }: Props) {
   const [imgSrc, setImgSrc] = useState(avatarSrc(emotion))
   const [imgOpacity, setImgOpacity] = useState(1)
   const [input, setInput] = useState('')
@@ -43,10 +44,6 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
     setInput('')
   }, [input, connected, aiStateBusy, addMsg, sendMessage])
 
-  const handleTranscript = useCallback((text: string) => {
-    addMsg({ id: `user-${Date.now()}`, role: 'user', content: text, timestamp: new Date() })
-    sendMessage(text)
-  }, [addMsg, sendMessage])
 
   // Mostra só as últimas 4 mensagens no modo compacto
   const lastMsgs = messages.slice(-4)
@@ -145,7 +142,13 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
         display: 'flex', gap: 5, alignItems: 'center',
         background: 'var(--color-krirk-sidebar)',
       }}>
-        <VoiceButton onTranscript={handleTranscript} disabled={!connected || aiStateBusy} />
+        {sendAudio && (
+          <VoiceButton
+            sendAudio={sendAudio}
+            onError={(msg) => addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date() })}
+            disabled={!connected || aiStateBusy}
+          />
+        )}
         <input
           value={input}
           onChange={e => setInput(e.target.value)}

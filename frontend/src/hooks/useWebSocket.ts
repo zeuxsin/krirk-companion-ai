@@ -11,6 +11,7 @@ interface UseWebSocketReturn {
   sendCodeMessage: (content: string) => void
   sendAudio: (base64: string) => void
   sendScreenshot: (prompt: string) => void
+  sendImageMessage: (base64: string) => void
   onEvent: (handler: (event: WSEvent) => void) => () => void
 }
 
@@ -94,10 +95,14 @@ export function useWebSocket(): UseWebSocketReturn {
     wsRef.current?.send(JSON.stringify({ type: 'screenshot', prompt }))
   }, [])
 
+  const sendImageMessage = useCallback((base64: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'image_chat', data: base64 }))
+  }, [])
+
   const onEvent = useCallback((handler: (e: WSEvent) => void) => {
     handlersRef.current.add(handler)
     return () => handlersRef.current.delete(handler)
   }, [])
 
-  return { connected, aiState, emotion, sendMessage, sendCodeMessage, sendAudio, sendScreenshot, onEvent }
+  return { connected, aiState, emotion, sendMessage, sendCodeMessage, sendAudio, sendScreenshot, sendImageMessage, onEvent }
 }

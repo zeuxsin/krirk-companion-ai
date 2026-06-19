@@ -85,13 +85,17 @@ class MemoryManager:
                 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
             """)
+            # Migration: adiciona is_proactive se não existir (banco legado)
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
+            if "is_proactive" not in cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0")
 
-    def save_message(self, user_id: str, role: str, content: str, emotion: str = "neutral"):
+    def save_message(self, user_id: str, role: str, content: str, emotion: str = "neutral", is_proactive: bool = False):
         now = datetime.now().isoformat()
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO messages (user_id, role, content, emotion, created_at) VALUES (?,?,?,?,?)",
-                (user_id, role, content, emotion, now)
+                "INSERT INTO messages (user_id, role, content, emotion, is_proactive, created_at) VALUES (?,?,?,?,?,?)",
+                (user_id, role, content, emotion, int(is_proactive), now)
             )
             conn.execute(
                 """INSERT INTO user_profile (user_id, total_messages, first_seen, last_seen)
@@ -115,12 +119,15 @@ class MemoryManager:
     def get_recent_messages(self, user_id: str, limit: int = 20) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT role, content FROM messages
+                """SELECT role, content, is_proactive FROM messages
                    WHERE user_id = ?
                    ORDER BY id DESC LIMIT ?""",
                 (user_id, limit)
             ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+        return [
+            {"role": r["role"], "content": r["content"], "is_proactive": bool(r["is_proactive"])}
+            for r in reversed(rows)
+        ]
 
     def save_fact(self, user_id: str, fact: str, category: str = "general"):
         now = datetime.now().isoformat()

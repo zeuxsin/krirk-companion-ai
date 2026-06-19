@@ -1,7 +1,25 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Play, Copy, Check, Send } from 'lucide-react'
 import { Message } from '../types'
 
-// ─── Sugestões do empty state ─────────────────────────────────────────────────
+// ── Paleta PowerShell ─────────────────────────────────────────────────────────
+const PS = {
+  bg:       '#012456',
+  bgDeep:   '#0a1628',
+  text:     '#cccccc',
+  prompt:   '#ffff00',
+  output:   '#ffffff',
+  error:    '#ff6b6b',
+  accent:   '#4ec9b0',
+  muted:    'rgba(204,204,204,0.4)',
+  border:   'rgba(78,201,176,0.2)',
+  selection:'rgba(255,255,0,0.15)',
+} as const
+
+const PS_FONT = '"Consolas", "Cascadia Code", "Courier New", monospace'
+const PS_PROMPT = 'PS C:\\KRIRK>'
+
+// ─── Sugestões ────────────────────────────────────────────────────────────────
 const CODE_SUGGESTIONS = [
   'Escreve um script Python para listar arquivos do Desktop',
   'Calcula o fatorial de 15',
@@ -9,7 +27,7 @@ const CODE_SUGGESTIONS = [
   'O que você pode fazer em modo coder?',
 ]
 
-// ─── Parseia texto em segmentos: texto puro vs blocos de código ───────────────
+// ─── Parser de blocos de código ───────────────────────────────────────────────
 type Segment = { type: 'text'; content: string } | { type: 'code'; lang: string; content: string }
 
 function parseContent(text: string): Segment[] {
@@ -17,7 +35,6 @@ function parseContent(text: string): Segment[] {
   const re = /```(\w*)\n?([\s\S]*?)```/g
   let last = 0
   let match: RegExpExecArray | null
-
   while ((match = re.exec(text)) !== null) {
     if (match.index > last) {
       const t = text.slice(last, match.index).trim()
@@ -26,16 +43,15 @@ function parseContent(text: string): Segment[] {
     segments.push({ type: 'code', lang: match[1] || 'text', content: match[2].trim() })
     last = match.index + match[0].length
   }
-
   const tail = text.slice(last).trim()
   if (tail) segments.push({ type: 'text', content: tail })
   return segments
 }
 
-// ─── Bloco de código com botão Executar ──────────────────────────────────────
-function CodeBlock({
-  lang, content, onExecute,
-}: { lang: string; content: string; onExecute?: (code: string) => void }) {
+// ─── Bloco de código estilo terminal ─────────────────────────────────────────
+function CodeBlock({ lang, content, onExecute }: {
+  lang: string; content: string; onExecute?: (code: string) => void
+}) {
   const [copied, setCopied] = useState(false)
   const canRun = lang === 'python' || lang === 'py' || lang === ''
 
@@ -45,46 +61,57 @@ function CodeBlock({
     setTimeout(() => setCopied(false), 1500)
   }
 
+  const langColor: Record<string, string> = {
+    python: '#4ec9b0',
+    py:     '#4ec9b0',
+    bash:   '#ce9178',
+    js:     '#dcdcaa',
+    ts:     '#569cd6',
+    json:   '#9cdcfe',
+    sql:    '#c586c0',
+  }
+  const borderColor = langColor[lang] ?? PS.accent
+
   return (
     <div style={{
-      borderRadius: 8, overflow: 'hidden',
-      border: '1px solid rgba(124,58,237,0.25)',
-      marginTop: 6, marginBottom: 6,
+      margin: '8px 0',
+      border: `1px solid ${PS.border}`,
+      borderLeft: `3px solid ${borderColor}`,
     }}>
-      {/* Header do bloco */}
+      {/* Barra do bloco */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '4px 10px',
-        background: 'rgba(124,58,237,0.12)',
-        fontSize: 11,
-        color: 'rgba(167,139,250,0.8)',
+        padding: '3px 8px',
+        background: 'rgba(0,0,0,0.3)',
+        borderBottom: `1px solid ${PS.border}`,
       }}>
-        <span>{lang || 'code'}</span>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <span style={{ fontSize: 10, color: borderColor, fontFamily: PS_FONT }}>{lang || 'code'}</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button
             onClick={handleCopy}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              color: copied ? '#34d399' : 'rgba(255,255,255,0.4)',
-              fontSize: 11, padding: '1px 4px',
+              color: copied ? '#34d399' : PS.muted,
+              display: 'flex', alignItems: 'center', gap: 3,
+              fontSize: 10, padding: '1px 4px',
             }}
           >
-            {copied ? '✓ copiado' : '📋 copiar'}
+            {copied ? <><Check size={10} /> copiado</> : <><Copy size={10} /> copiar</>}
           </button>
           {canRun && onExecute && (
             <button
               onClick={() => onExecute(content)}
               style={{
-                background: 'rgba(124,58,237,0.3)',
-                border: '1px solid rgba(124,58,237,0.4)',
-                borderRadius: 4,
+                background: 'rgba(78,201,176,0.15)',
+                border: `1px solid ${PS.border}`,
                 cursor: 'pointer',
-                color: '#e4e4e7',
-                fontSize: 11, padding: '1px 8px',
-                fontWeight: 600,
+                color: PS.accent,
+                fontSize: 10, padding: '1px 8px',
+                display: 'flex', alignItems: 'center', gap: 3,
+                fontFamily: PS_FONT,
               }}
             >
-              ▶ Executar
+              <Play size={9} /> Executar
             </button>
           )}
         </div>
@@ -92,15 +119,12 @@ function CodeBlock({
 
       {/* Código */}
       <pre style={{
-        margin: 0,
-        padding: '10px 14px',
-        background: '#0d1117',
+        margin: 0, padding: '10px 14px',
+        background: PS.bgDeep,
         color: '#e6edf3',
-        fontSize: 12,
-        lineHeight: 1.6,
-        fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
-        overflowX: 'auto',
-        whiteSpace: 'pre',
+        fontSize: 12, lineHeight: 1.6,
+        fontFamily: PS_FONT,
+        overflowX: 'auto', whiteSpace: 'pre',
       }}>
         {content}
       </pre>
@@ -108,103 +132,66 @@ function CodeBlock({
   )
 }
 
-// ─── Bolha de mensagem para o CodeMode ───────────────────────────────────────
-function CodeBubble({ msg, onExecute }: {
-  msg: Message
-  onExecute?: (code: string) => void
-}) {
+// ─── Linha de mensagem estilo terminal ───────────────────────────────────────
+function TerminalLine({ msg, onExecute }: { msg: Message; onExecute?: (code: string) => void }) {
+  const isUser = msg.role === 'user'
+
   if (msg.role === 'tool') {
     return (
       <div className="anim-fadein" style={{
-        display: 'flex', justifyContent: 'center', marginBottom: 8,
+        padding: '2px 0', fontSize: 12, fontFamily: PS_FONT,
+        color: PS.accent, marginBottom: 2,
+        display: 'flex', alignItems: 'center', gap: 6,
       }}>
-        <div style={{
-          background: 'rgba(124,58,237,0.12)',
-          border: '1px solid rgba(124,58,237,0.3)',
-          borderRadius: 20, padding: '4px 14px',
-          fontSize: 12, color: 'rgba(167,139,250,0.8)',
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          {msg.isRunning
-            ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⚙</span> Executando {msg.toolName}...</>
-            : <>✓ {msg.toolName}</>}
-        </div>
+        {msg.isRunning
+          ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⚙</span> Executando: {msg.toolName}...</>
+          : <><Check size={11} /> {msg.toolName} {msg.toolResult ? `→ ${msg.toolResult.slice(0, 80)}` : ''}</>}
       </div>
     )
   }
 
-  const isUser = msg.role === 'user'
-  const timeStr = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const segments = isUser ? null : parseContent(msg.content)
+  if (isUser) {
+    return (
+      <div className="anim-fadein" style={{
+        padding: '3px 0', fontSize: 13, fontFamily: PS_FONT,
+        marginBottom: 2, lineHeight: 1.5,
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      }}>
+        <span style={{ color: PS.prompt, userSelect: 'none' }}>{PS_PROMPT} </span>
+        <span style={{ color: PS.output }}>{msg.content}</span>
+      </div>
+    )
+  }
 
+  // Mensagem da KRIRK — sem bolha, texto flat com blocos de código
+  const segments = parseContent(msg.content)
   return (
     <div className="anim-fadein" style={{
-      display: 'flex',
-      justifyContent: isUser ? 'flex-end' : 'flex-start',
-      marginBottom: 10,
-      gap: 8,
-      alignItems: 'flex-end',
+      paddingLeft: 0, marginBottom: 8,
     }}>
-      {!isUser && (
-        <div style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          background: 'linear-gradient(135deg, #0ea5e9, #6d28d9)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 12, fontWeight: 700, color: '#fff',
-        }}>Q</div>
-      )}
-
-      <div style={{
-        maxWidth: '80%', display: 'flex', flexDirection: 'column',
-        alignItems: isUser ? 'flex-end' : 'flex-start',
-      }}>
-        {isUser ? (
-          <div style={{
-            padding: '8px 12px',
-            borderRadius: '14px 14px 4px 14px',
-            background: 'var(--color-krirk-accent)',
-            color: '#fff', fontSize: 13, lineHeight: 1.6,
+      {segments.map((seg, i) =>
+        seg.type === 'code' ? (
+          <CodeBlock key={i} lang={seg.lang} content={seg.content} onExecute={onExecute} />
+        ) : (
+          <p key={i} style={{
+            margin: '2px 0',
+            fontSize: 13, lineHeight: 1.6,
+            fontFamily: PS_FONT,
+            color: PS.text,
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}>
-            {msg.content}
-            {msg.isStreaming && (
-              <span style={{
-                display: 'inline-block', width: 7, height: 13,
-                background: '#a78bfa', marginLeft: 3, borderRadius: 2,
-                verticalAlign: 'text-bottom', animation: 'blink 0.7s infinite',
-              }} />
-            )}
-          </div>
-        ) : (
-          <div style={{
-            padding: segments?.length === 0 ? 0 : '2px 0',
-            color: 'var(--color-krirk-text)',
-            fontSize: 13, lineHeight: 1.7,
-            maxWidth: '100%',
-          }}>
-            {segments?.map((seg, i) =>
-              seg.type === 'code' ? (
-                <CodeBlock key={i} lang={seg.lang} content={seg.content} onExecute={onExecute} />
-              ) : (
-                <p key={i} style={{ margin: '4px 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {seg.content}
-                </p>
-              )
-            )}
-            {msg.isStreaming && (
-              <span style={{
-                display: 'inline-block', width: 7, height: 13,
-                background: '#a78bfa', marginLeft: 3, borderRadius: 2,
-                verticalAlign: 'text-bottom', animation: 'blink 0.7s infinite',
-              }} />
-            )}
-          </div>
-        )}
-
-        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', marginTop: 3 }}>
-          {timeStr}
-        </span>
-      </div>
+            {seg.content}
+          </p>
+        )
+      )}
+      {msg.isStreaming && (
+        <span style={{
+          display: 'inline-block', width: 7, height: 14,
+          background: PS.accent, marginLeft: 2,
+          verticalAlign: 'text-bottom',
+          animation: 'blink 0.7s infinite',
+        }} />
+      )}
     </div>
   )
 }
@@ -213,25 +200,11 @@ function CodeBubble({ msg, onExecute }: {
 function TypingIndicator() {
   return (
     <div className="anim-fadein" style={{
-      display: 'flex', gap: 8, marginBottom: 10, alignItems: 'flex-end',
+      padding: '3px 0', fontSize: 12, fontFamily: PS_FONT, color: PS.muted,
     }}>
-      <div style={{
-        width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-        background: 'linear-gradient(135deg, #0ea5e9, #6d28d9)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, fontWeight: 700, color: '#fff',
-      }}>Q</div>
-      <div style={{
-        padding: '10px 14px',
-        borderRadius: '16px 16px 16px 4px',
-        background: 'rgba(255,255,255,0.06)',
-        border: '1px solid var(--color-krirk-border)',
-        display: 'flex', alignItems: 'center',
-      }}>
-        <span className="typing-dots">
-          <span /><span /><span />
-        </span>
-      </div>
+      {PS_PROMPT} <span className="typing-dots" style={{ display: 'inline-flex', gap: 2 }}>
+        <span style={{ background: PS.muted }} /><span style={{ background: PS.muted }} /><span style={{ background: PS.muted }} />
+      </span>
     </div>
   )
 }
@@ -239,47 +212,31 @@ function TypingIndicator() {
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function CodeEmptyState({ onSend }: { onSend: (text: string) => void }) {
   return (
-    <div style={{ margin: 'auto', textAlign: 'center', padding: '0 16px' }}>
-      <div style={{ fontSize: 36, marginBottom: 8 }}>💻</div>
-      <p style={{
-        color: 'rgba(14,165,233,0.9)', fontSize: 14, fontWeight: 600,
-        marginBottom: 4,
-      }}>
-        Modo Coder
-      </p>
-      <p style={{
-        color: 'var(--color-krirk-muted)', fontSize: 12,
-        marginBottom: 20, lineHeight: 1.5,
-      }}>
-        qwen2.5-coder · Python execution habilitado
-      </p>
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center',
-      }}>
+    <div style={{ margin: 'auto', padding: '0 8px', fontFamily: PS_FONT }}>
+      <div style={{ color: PS.accent, fontSize: 13, marginBottom: 4 }}>
+        Windows PowerShell · KRIRK Coder
+      </div>
+      <div style={{ color: PS.muted, fontSize: 11, marginBottom: 16, lineHeight: 1.6 }}>
+        Copyright (C) Microsoft Corporation. Todos os direitos reservados.<br />
+        Modelo: qwen2.5-coder · execute_python habilitado<br />
+        Digite uma pergunta ou comando abaixo.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {CODE_SUGGESTIONS.map(s => (
           <button
             key={s}
             onClick={() => onSend(s)}
             style={{
-              padding: '7px 12px', borderRadius: 20,
-              border: '1px solid rgba(14,165,233,0.25)',
-              background: 'rgba(14,165,233,0.06)',
-              color: 'var(--color-krirk-muted)',
-              fontSize: 11, cursor: 'pointer',
-              transition: 'border-color 0.15s, color 0.15s, background 0.15s',
-              textAlign: 'left',
+              background: 'none', border: 'none', cursor: 'pointer',
+              textAlign: 'left', padding: '2px 0',
+              fontFamily: PS_FONT, fontSize: 12,
+              color: PS.muted,
+              transition: 'color 0.15s',
             }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'rgba(14,165,233,0.5)'
-              e.currentTarget.style.color = 'var(--color-krirk-text)'
-              e.currentTarget.style.background = 'rgba(14,165,233,0.1)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'rgba(14,165,233,0.25)'
-              e.currentTarget.style.color = 'var(--color-krirk-muted)'
-              e.currentTarget.style.background = 'rgba(14,165,233,0.06)'
-            }}
+            onMouseEnter={e => e.currentTarget.style.color = PS.accent}
+            onMouseLeave={e => e.currentTarget.style.color = PS.muted}
           >
+            <span style={{ color: PS.prompt }}>{PS_PROMPT} </span>
             {s}
           </button>
         ))}
@@ -302,13 +259,12 @@ export function CodeMode({ messages, addMsg, sendCodeMessage, connected, aiState
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const isThinking = aiStateBusy
     && !messages.some(m => m.isStreaming)
     && !messages.some(m => m.role === 'tool' && m.isRunning)
 
-  // Smart scroll
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -325,106 +281,87 @@ export function CodeMode({ messages, addMsg, sendCodeMessage, connected, aiState
   }, [connected, aiStateBusy, addMsg, sendCodeMessage])
 
   const handleExecute = useCallback((code: string) => {
-    const prompt = `Execute este código Python:\n\`\`\`python\n${code}\n\`\`\``
-    send(prompt)
+    send(`Execute este código Python:\n\`\`\`python\n${code}\n\`\`\``)
   }, [send])
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send(input)
-    }
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      {/* Header */}
+    <div style={{
+      display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden',
+      background: PS.bg, color: PS.text, fontFamily: PS_FONT,
+    }}>
+      {/* Barra de título */}
       <div style={{
-        padding: '10px 16px',
-        borderBottom: '1px solid var(--color-krirk-border)',
-        background: 'var(--color-krirk-bg)',
+        padding: '6px 16px',
+        background: 'rgba(0,0,0,0.4)',
+        borderBottom: `1px solid ${PS.border}`,
         display: 'flex', alignItems: 'center', gap: 10,
       }}>
-        <span style={{ fontSize: 15 }}>💻</span>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-krirk-text)' }}>
-            Modo Coder
-          </div>
-          <div style={{ fontSize: 10, color: 'rgba(14,165,233,0.7)' }}>
-            qwen2.5-coder · execute_python habilitado
-          </div>
-        </div>
+        <span style={{ fontSize: 12, color: PS.accent, fontWeight: 600 }}>
+          Windows PowerShell · KRIRK Coder
+        </span>
+        <span style={{ fontSize: 10, color: PS.muted }}>
+          qwen2.5-coder · execute_python habilitado
+        </span>
       </div>
 
       {/* Mensagens */}
       <div ref={scrollRef} style={{
-        flex: 1, overflowY: 'auto', padding: '14px 16px',
+        flex: 1, overflowY: 'auto', padding: '10px 16px',
         display: 'flex', flexDirection: 'column',
       }}>
         {messages.length === 0 && !isThinking ? (
-          <CodeEmptyState onSend={(text) => send(text)} />
+          <CodeEmptyState onSend={send} />
         ) : (
-          messages.map(m => (
-            <CodeBubble key={m.id} msg={m} onExecute={handleExecute} />
-          ))
+          messages.map(m => <TerminalLine key={m.id} msg={m} onExecute={handleExecute} />)
         )}
-
         {isThinking && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input estilo prompt PS */}
       <div style={{
         padding: '10px 12px',
-        borderTop: '1px solid var(--color-krirk-border)',
-        background: 'var(--color-krirk-sidebar)',
+        borderTop: `1px solid ${PS.border}`,
+        background: 'rgba(0,0,0,0.3)',
       }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-          <textarea
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+          <span style={{
+            color: PS.prompt, fontSize: 13, fontFamily: PS_FONT,
+            flexShrink: 0, paddingRight: 6, userSelect: 'none',
+          }}>
+            {PS_PROMPT}
+          </span>
+          <input
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={connected ? 'Pergunte sobre código ou peça para executar algo... (Shift+Enter = nova linha)' : 'Reconectando...'}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send(input))}
+            placeholder={connected ? '' : 'Reconectando...'}
             disabled={!connected || aiStateBusy}
-            rows={1}
             style={{
-              flex: 1, padding: '8px 12px',
-              borderRadius: 8,
-              border: '1px solid rgba(14,165,233,0.2)',
-              background: 'var(--color-krirk-surface)',
-              color: 'var(--color-krirk-text)',
-              fontSize: 13, outline: 'none',
-              resize: 'none', lineHeight: 1.5,
-              minHeight: 36, maxHeight: 120,
-              overflowY: 'auto',
-              fontFamily: 'inherit',
-            }}
-            onInput={e => {
-              const el = e.currentTarget
-              el.style.height = 'auto'
-              el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+              flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              color: PS.output, fontSize: 13, fontFamily: PS_FONT,
+              caretColor: PS.prompt,
             }}
           />
           <button
             onClick={() => send(input)}
             disabled={!connected || aiStateBusy || !input.trim()}
             style={{
-              width: 34, height: 34, borderRadius: 8, border: 'none', flexShrink: 0,
-              background: input.trim() && connected && !aiStateBusy
-                ? 'linear-gradient(135deg, #0ea5e9, #6d28d9)'
-                : 'var(--color-krirk-surface)',
-              color: '#fff', cursor: 'pointer', fontSize: 14,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 0.15s',
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: input.trim() && connected && !aiStateBusy ? PS.accent : PS.muted,
+              display: 'flex', alignItems: 'center',
+              padding: '4px 6px', transition: 'color 0.15s',
             }}
-          >▶</button>
+          >
+            <Send size={14} />
+          </button>
         </div>
         <div style={{
-          marginTop: 5, fontSize: 10, color: 'rgba(255,255,255,0.2)',
-          paddingLeft: 2,
+          marginTop: 4, fontSize: 10, color: PS.muted,
+          paddingLeft: `${PS_PROMPT.length + 1}ch`,
         }}>
-          Enter envia · Shift+Enter nova linha · blocos Python têm botão ▶ Executar
+          Enter envia · blocos Python têm botão Executar
         </div>
       </div>
     </div>

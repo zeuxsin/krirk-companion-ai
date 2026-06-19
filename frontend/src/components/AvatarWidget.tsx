@@ -1,34 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { EmotionType, AIState } from '../types'
+import { avatarSrc, avatarFallback, EMOTION_TO_IMG } from '../utils/emotions'
 
-// Mapeamento: emoção do backend → nome do arquivo de imagem
-const EMOTION_TO_IMAGE: Record<EmotionType, string> = {
-  neutral:    'neutro',
-  happy:      'animada',
-  excited:    'surpresa',
-  thoughtful: 'pensando',
-  curious:    'curiosa',
-  concerned:  'cansada',
-  playful:    'animada',
-  angry:      'irritada',
-  confused:   'confusa',
-}
-
-const EMOTION_EMOJI: Record<EmotionType, string> = {
-  neutral:    '😐',
-  happy:      '😊',
-  excited:    '🤩',
-  thoughtful: '💭',
-  curious:    '🤔',
-  concerned:  '😟',
-  playful:    '😄',
-  angry:      '😠',
-  confused:   '😵',
-}
-
-// Extensão preferida: tenta PNG, fallback para SVG
 function buildSrc(emotion: EmotionType, ext: 'png' | 'svg'): string {
-  return `/avatar/${EMOTION_TO_IMAGE[emotion]}.${ext}`
+  return ext === 'png' ? avatarSrc(emotion) : avatarFallback(emotion)
 }
 
 // Salvar/restaurar posição no localStorage
@@ -164,7 +139,7 @@ export function AvatarWidget({ emotion, aiState }: Props) {
           border: '2px solid #a78bfa',
           animation: 'krirk-idle 3s ease-in-out infinite',
         }}>
-          {EMOTION_EMOJI[emotion]}
+          ✨
         </div>
         <button
           onClick={() => setMinimized(false)}
@@ -289,7 +264,7 @@ export function AvatarWidget({ emotion, aiState }: Props) {
           color: '#a1a1aa',
           letterSpacing: '0.05em',
         }}>
-          {EMOTION_EMOJI[emotion]} {EMOTION_TO_IMAGE[emotion]}
+          {EMOTION_TO_IMG[emotion] ?? emotion}
         </div>
       </div>
     </>

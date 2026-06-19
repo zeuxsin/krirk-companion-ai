@@ -605,6 +605,67 @@ class Orchestrator:
         }
         yield {"type": "status", "state": "idle"}
 
+    async def process_image_chat(
+        self,
+        image_b64: str,
+        user_id: str = "default",
+    ) -> AsyncGenerator[dict, None]:
+        """Recebe imagem do usuário (base64) → passa para o modelo de visão → streama resposta."""
+
+        self.state.set(AISystemState.THINKING)
+        yield {"type": "status", "state": "thinking"}
+
+        # Gera thumbnail para mostrar no chat (max 400px)
+        thumb_b64 = image_b64
+        try:
+            import base64, io
+            from PIL import Image
+            raw = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(raw))
+            img.thumbnail((400, 400), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=75)
+            thumb_b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            pass
+
+        yield {"type": "screenshot_taken", "thumbnail": f"data:image/jpeg;base64,{thumb_b64}"}
+
+        prompt = "Descreva o que você vê nessa imagem que o usuário enviou. Seja específica e útil."
+        self.memory.save_message(user_id, "user", "[Imagem enviada pelo usuário]")
+
+        system_prompt = self.personality.build_system_prompt(
+            current_emotion=self.emotion.current_emotion,
+            user_facts=self.memory.get_facts(user_id, limit=4),
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": prompt},
+        ]
+
+        self.state.set(AISystemState.SPEAKING)
+        yield {"type": "status", "state": "speaking"}
+
+        full_response = ""
+        async for token in self._stream_ollama(messages, images=[image_b64]):
+            full_response += token
+            yield {"type": "token", "content": token}
+
+        new_emotion = self.emotion.analyze_and_update(full_response)
+        self.memory.save_message(user_id, "assistant", full_response, emotion=new_emotion)
+        self.memory.update_intimacy(user_id, 0.1)
+
+        audio_b64 = await self.tts.generate(full_response)
+        self.state.set(AISystemState.IDLE)
+
+        yield {
+            "type": "response_complete",
+            "content": full_response,
+            "emotion": new_emotion,
+            "audio": audio_b64,
+        }
+        yield {"type": "status", "state": "idle"}
+
     # ── Context Management ────────────────────────────────────────────────────
 
     def _estimate_tokens(self, text: str) -> int:

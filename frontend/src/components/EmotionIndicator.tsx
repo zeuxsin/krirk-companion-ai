@@ -1,26 +1,12 @@
-import React, { useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { EmotionType, AIState } from '../types'
+import { EMOTION_COLOR } from '../utils/emotions'
 
-// Invoca comando Tauri se estiver rodando como app desktop
 async function tauriSetAlwaysOnTop(value: boolean) {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     await invoke('set_always_on_top', { value })
-  } catch {
-    // Não está rodando via Tauri (browser) — silencia
-  }
-}
-
-const EMOTION_EMOJI: Record<EmotionType, string> = {
-  neutral:    '😐',
-  happy:      '😊',
-  curious:    '🤔',
-  thoughtful: '💭',
-  excited:    '🤩',
-  concerned:  '😟',
-  playful:    '😄',
-  angry:      '😠',
-  confused:   '😵',
+  } catch { /* browser dev mode */ }
 }
 
 const STATE_LABEL: Record<AIState, string> = {
@@ -64,9 +50,12 @@ export function EmotionIndicator({ emotion, state, connected }: Props) {
       borderBottom: '1px solid #27272a',
       fontSize: '13px',
     }}>
-      <span style={{ fontSize: '22px' }} title={emotion}>
-        {EMOTION_EMOJI[emotion]}
-      </span>
+      <span style={{
+        width: 14, height: 14, borderRadius: '50%',
+        background: EMOTION_COLOR[emotion] ?? '#71717a',
+        display: 'inline-block',
+        boxShadow: `0 0 6px ${EMOTION_COLOR[emotion] ?? '#71717a'}`,
+      }} title={emotion} />
       <span style={{ color: '#a1a1aa' }}>Krirk</span>
       <span style={{
         display: 'flex',

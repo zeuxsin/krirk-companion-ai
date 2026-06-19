@@ -1,15 +1,16 @@
 import React from 'react'
+import { MessageSquare, LayoutGrid, Sparkles, Terminal, Settings } from 'lucide-react'
 import { EmotionType, AIState } from '../types'
 import { EMOTION_COLOR } from '../utils/emotions'
 
 export type AppMode = 'chat' | 'sidebar' | 'avatar' | 'code' | 'settings'
 
-const MODE_ITEMS: { id: AppMode; label: string; icon: string }[] = [
-  { id: 'chat',     label: 'Chat',          icon: '💬' },
-  { id: 'sidebar',  label: 'Sidebar',       icon: '🪟' },
-  { id: 'avatar',   label: 'Avatar',        icon: '✨' },
-  { id: 'code',     label: 'Coder',         icon: '💻' },
-  { id: 'settings', label: 'Configurações', icon: '⚙️' },
+const MODE_ITEMS: { id: AppMode; label: string; Icon: React.ElementType }[] = [
+  { id: 'chat',     label: 'Chat',          Icon: MessageSquare },
+  { id: 'sidebar',  label: 'Sidebar',       Icon: LayoutGrid },
+  { id: 'avatar',   label: 'Avatar',        Icon: Sparkles },
+  { id: 'code',     label: 'Coder',         Icon: Terminal },
+  { id: 'settings', label: 'Configurações', Icon: Settings },
 ]
 
 interface Props {
@@ -120,7 +121,7 @@ export function Sidebar({
           Modo
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {MODE_ITEMS.map(({ id, label, icon }) => {
+          {MODE_ITEMS.map(({ id, label, Icon }) => {
             const isActive = mode === id && id !== 'settings'
             return (
               <button
@@ -149,7 +150,7 @@ export function Sidebar({
                   if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
                 }}
               >
-                <span style={{ fontSize: 13 }}>{icon}</span>
+                <Icon size={14} />
                 <span>{label}</span>
               </button>
             )

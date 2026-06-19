@@ -116,4 +116,4 @@ tools:
     - open_app
     - set_timer
     - execute_python   # executa snippets Python localmente (Modo Coder)
-    # write_file — omitido intencionalmente (potencialmente destrutivo)
+    - write_file       # salva arquivos dentro do home do usuário (Desktop, Documents, etc.)

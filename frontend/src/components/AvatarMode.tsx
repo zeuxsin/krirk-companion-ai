@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { EmotionType, AIState, Message, WSEvent } from '../types'
 import {
   EMOTION_COLOR,

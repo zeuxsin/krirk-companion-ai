@@ -18,38 +18,66 @@ from backend.tools.base import Tool, ToolParam
 
 # Nomes comuns de sites → URL canônica
 _SITE_ALIASES: dict[str, str] = {
-    "youtube":     "https://youtube.com",
-    "google":      "https://google.com",
-    "github":      "https://github.com",
-    "reddit":      "https://reddit.com",
-    "twitter":     "https://twitter.com",
-    "x":           "https://x.com",
-    "instagram":   "https://instagram.com",
-    "facebook":    "https://facebook.com",
-    "netflix":     "https://netflix.com",
-    "spotify":     "https://open.spotify.com",
-    "twitch":      "https://twitch.tv",
-    "discord":     "https://discord.com/app",
-    "gmail":       "https://mail.google.com",
-    "chatgpt":     "https://chatgpt.com",
-    "claude":      "https://claude.ai",
+    "youtube":       "https://youtube.com",
+    "google":        "https://google.com",
+    "github":        "https://github.com",
+    "reddit":        "https://reddit.com",
+    "twitter":       "https://twitter.com",
+    "x":             "https://x.com",
+    "instagram":     "https://instagram.com",
+    "facebook":      "https://facebook.com",
+    "netflix":       "https://netflix.com",
+    "spotify":       "https://open.spotify.com",
+    "twitch":        "https://twitch.tv",
+    "discord":       "https://discord.com/app",
+    "gmail":         "https://mail.google.com",
+    "chatgpt":       "https://chatgpt.com",
+    "claude":        "https://claude.ai",
     "stackoverflow": "https://stackoverflow.com",
-    "wikipedia":   "https://wikipedia.org",
-    "amazon":      "https://amazon.com.br",
-    "mercadolivre": "https://mercadolivre.com.br",
-    "linkedin":    "https://linkedin.com",
+    "wikipedia":     "https://wikipedia.org",
+    "amazon":        "https://amazon.com.br",
+    "mercadolivre":  "https://mercadolivre.com.br",
+    "linkedin":      "https://linkedin.com",
+    "xbox":          "https://www.xbox.com",
+    "playstation":   "https://www.playstation.com",
+    "steam":         "https://store.steampowered.com",
+    "epic":          "https://store.epicgames.com",
+    "epic games":    "https://store.epicgames.com",
+    "trello":        "https://trello.com",
+    "notion":        "https://notion.so",
+    "figma":         "https://figma.com",
+    "canva":         "https://canva.com",
+    "translate":     "https://translate.google.com",
+    "tradutor":      "https://translate.google.com",
+    "maps":          "https://maps.google.com",
+    "drive":         "https://drive.google.com",
+    "docs":          "https://docs.google.com",
+    "sheets":        "https://sheets.google.com",
+    "outlook":       "https://outlook.live.com",
 }
 
 
 async def _open_url(url: str) -> str:
     """Abre uma URL no browser padrão do Windows."""
     try:
-        # Verifica se é um nome de site conhecido
         key = url.lower().strip().rstrip("/")
+
+        # 1. Alias exato
         if key in _SITE_ALIASES:
             url = _SITE_ALIASES[key]
-        elif not url.startswith(("http://", "https://")):
-            url = "https://" + url
+        else:
+            # 2. Adiciona protocolo se necessário
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
+
+            # 3. TLD completion: se o domínio não tem ponto, adiciona .com
+            #    Ex: "https://xbox" → "https://xbox.com"
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.netloc or parsed.path.split("/")[0]
+            if "." not in domain:
+                url = f"https://{domain}.com"
+
         subprocess.Popen(["start", url], shell=True)
         return f"URL aberta: {url}"
     except Exception as e:
@@ -107,10 +135,64 @@ _APP_ALIASES: dict[str, str] = {
 }
 
 
+def _find_app_path(name: str) -> str | None:
+    """Tenta localizar o executável por múltiplos métodos."""
+    import shutil
+    import winreg
+    from pathlib import Path
+
+    exe = name if name.endswith(".exe") else name + ".exe"
+
+    # 1. PATH do sistema
+    found = shutil.which(exe) or shutil.which(name)
+    if found:
+        return found
+
+    # 2. Registro do Windows — App Paths
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(hive, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}")
+            val, _ = winreg.QueryValueEx(key, "")
+            winreg.CloseKey(key)
+            if val and Path(val).exists():
+                return val
+        except OSError:
+            pass
+
+    # 3. Busca em diretórios comuns (profundidade 3, timeout implícito pelo limite de glob)
+    search_dirs = [
+        Path(r"C:\Program Files"),
+        Path(r"C:\Program Files (x86)"),
+        Path.home() / "AppData" / "Local" / "Programs",
+        Path.home() / "AppData" / "Roaming",
+    ]
+    for base in search_dirs:
+        if not base.exists():
+            continue
+        try:
+            # glob com padrão de até 3 níveis de profundidade
+            for pattern in (f"**/{exe}", f"**/{name}.exe"):
+                matches = list(base.glob(pattern))
+                if matches:
+                    return str(matches[0])
+        except Exception:
+            continue
+
+    return None
+
+
 async def _open_app(app_name: str) -> str:
     """Abre um aplicativo do Windows pelo nome."""
     try:
-        resolved = _APP_ALIASES.get(app_name.lower().strip(), app_name)
+        key = app_name.lower().strip()
+        resolved = _APP_ALIASES.get(key, app_name)
+
+        # Se não está nos aliases, tenta localizar no sistema
+        if resolved == app_name:
+            found = _find_app_path(app_name)
+            if found:
+                resolved = found
+
         subprocess.Popen(["start", "", resolved], shell=True)
         return f"Aplicativo aberto: {app_name}"
     except Exception as e:

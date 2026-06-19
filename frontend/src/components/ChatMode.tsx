@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Message } from '../types'
+import { Camera, Copy, Check, Paperclip, Send } from 'lucide-react'
+import { Message, EmotionType } from '../types'
 import { VoiceButton } from './VoiceButton'
+import { avatarChatSrc, EMOTION_COLOR } from '../utils/emotions'
 
 // ─── Sugestões do empty state ─────────────────────────────────────────────────
 const SUGGESTIONS = [
@@ -9,6 +11,83 @@ const SUGGESTIONS = [
   'Me conta uma curiosidade',
   'O que você pode fazer?',
 ]
+
+// ─── AvatarChatImg — avatar da Krirk com fallback em cadeia ──────────────────
+function AvatarChatImg({ emotion, isProactive }: { emotion?: EmotionType; isProactive?: boolean }) {
+  const emo = emotion ?? 'neutra'
+  const borderColor = isProactive ? EMOTION_COLOR['tranquila'] : EMOTION_COLOR[emo as EmotionType] ?? '#7c3aed'
+
+  const [src, setSrc] = useState(() => avatarChatSrc(emo as EmotionType))
+  const fallbackStage = useRef(0)
+
+  useEffect(() => {
+    fallbackStage.current = 0
+    setSrc(avatarChatSrc(emo as EmotionType))
+  }, [emo])
+
+  const handleError = () => {
+    fallbackStage.current += 1
+    if (fallbackStage.current === 1) {
+      // Tenta a pasta principal do avatar
+      const name = emo
+      setSrc(`/avatar/${name}.png`)
+    } else if (fallbackStage.current === 2) {
+      setSrc('/avatar/neutra.png')
+    } else if (fallbackStage.current === 3) {
+      setSrc('/avatar/neutro.png')
+    }
+    // fallbackStage 4+ → deixa a img com o erro (sem loop infinito)
+  }
+
+  return (
+    <img
+      src={src}
+      onError={handleError}
+      alt={emo}
+      title={isProactive ? 'Comentário espontâneo' : undefined}
+      style={{
+        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        objectFit: 'cover',
+        border: `2px solid ${isProactive ? borderColor : 'transparent'}`,
+        boxShadow: isProactive ? `0 0 6px ${borderColor}66` : 'none',
+      }}
+    />
+  )
+}
+
+// ─── UserAvatarImg — avatar do usuário com fallback SVG ──────────────────────
+function UserAvatarImg() {
+  const [showFallback, setShowFallback] = useState(false)
+
+  if (showFallback) {
+    return (
+      <div style={{
+        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        background: 'rgba(124,58,237,0.2)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: '1px solid rgba(124,58,237,0.3)',
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.8)" strokeWidth="2">
+          <circle cx="12" cy="8" r="4"/>
+          <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src="/avatar/chat/user.png"
+      onError={() => setShowFallback(true)}
+      alt="Você"
+      style={{
+        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        objectFit: 'cover',
+        border: '1px solid rgba(124,58,237,0.3)',
+      }}
+    />
+  )
+}
 
 // ─── ToolChip ─────────────────────────────────────────────────────────────────
 function ToolChip({ msg }: { msg: Message }) {
@@ -30,7 +109,7 @@ function ToolChip({ msg }: { msg: Message }) {
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {msg.isRunning ? (
             <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⚙</span>
-          ) : '✓'}
+          ) : <Check size={12} />}
           {msg.isRunning
             ? `Executando: ${msg.toolName}...`
             : msg.toolName}
@@ -97,15 +176,7 @@ function Bubble({ msg }: { msg: Message }) {
       }}
     >
       {!isUser && (
-        <div title={msg.isProactive ? 'Comentário espontâneo' : undefined} style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          background: msg.isProactive
-            ? 'linear-gradient(135deg, #4f46e5, #7c3aed)'
-            : 'linear-gradient(135deg, #7c3aed, #a855f7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: msg.isProactive ? 13 : 12, fontWeight: 700, color: '#fff',
-          opacity: msg.isProactive ? 0.85 : 1,
-        }}>{msg.isProactive ? '💭' : 'K'}</div>
+        <AvatarChatImg emotion={msg.emotion} isProactive={msg.isProactive} />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', maxWidth: '72%' }}>
@@ -124,7 +195,7 @@ function Bubble({ msg }: { msg: Message }) {
           {msg.thumbnail && (
             <img
               src={msg.thumbnail}
-              alt="screenshot"
+              alt="imagem"
               style={{
                 maxWidth: '100%', borderRadius: 6,
                 display: 'block',
@@ -158,17 +229,20 @@ function Bubble({ msg }: { msg: Message }) {
               title="Copiar resposta"
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: 11, padding: '0 2px', lineHeight: 1,
-                color: copied ? '#34d399' : 'rgba(255,255,255,0.3)',
+                padding: '0 2px', lineHeight: 1,
+                color: copied ? '#34d399' : 'rgba(255,255,255,0.4)',
                 opacity: hovered || copied ? 1 : 0,
                 transition: 'opacity 0.15s, color 0.15s',
+                display: 'flex', alignItems: 'center',
               }}
             >
-              {copied ? '✓' : '📋'}
+              {copied ? <Check size={12} /> : <Copy size={12} />}
             </button>
           )}
         </div>
       </div>
+
+      {isUser && <UserAvatarImg />}
     </div>
   )
 }
@@ -179,12 +253,7 @@ function TypingIndicator() {
     <div className="anim-fadein" style={{
       display: 'flex', gap: 8, marginBottom: 10, alignItems: 'flex-end',
     }}>
-      <div style={{
-        width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-        background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, fontWeight: 700, color: '#fff',
-      }}>K</div>
+      <AvatarChatImg emotion="neutra" />
       <div style={{
         padding: '10px 14px',
         borderRadius: '16px 16px 16px 4px',
@@ -250,25 +319,25 @@ interface Props {
   sendMessage: (text: string) => void
   sendAudio: (b64Wav: string) => void
   sendScreenshot: (prompt: string) => void
+  sendImageMessage?: (b64: string) => void
   connected: boolean
   aiStateBusy: boolean
 }
 
 // ─── ChatMode ─────────────────────────────────────────────────────────────────
 export function ChatMode({
-  messages, addMsg, sendMessage, sendAudio, sendScreenshot, connected, aiStateBusy,
+  messages, addMsg, sendMessage, sendAudio, sendScreenshot, sendImageMessage, connected, aiStateBusy,
 }: Props) {
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // "Thinking" = ocupado mas sem nenhuma mensagem em streaming nem tool rodando
   const isThinking = aiStateBusy
     && !messages.some(m => m.isStreaming)
     && !messages.some(m => m.role === 'tool' && m.isRunning)
 
-  // Smart scroll: só rola para o fim se o usuário já está perto do fundo
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -300,9 +369,38 @@ export function ChatMode({
 
   const handleScreenshot = useCallback(() => {
     if (!connected || aiStateBusy) return
-    addMsg({ id: `user-${Date.now()}`, role: 'user', content: '📷 Analisando minha tela...', timestamp: new Date() })
+    addMsg({ id: `user-${Date.now()}`, role: 'user', content: 'Analisando minha tela...', timestamp: new Date() })
     sendScreenshot('Descreva o que você vê na minha tela. Seja específica e útil.')
   }, [connected, aiStateBusy, addMsg, sendScreenshot])
+
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !connected || aiStateBusy) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const b64 = (reader.result as string).split(',')[1]
+      const thumbUrl = reader.result as string
+      addMsg({
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: '',
+        thumbnail: thumbUrl,
+        timestamp: new Date(),
+      })
+      sendImageMessage?.(b64)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }, [connected, aiStateBusy, addMsg, sendImageMessage])
+
+  const btnStyle = (enabled: boolean) => ({
+    width: 34, height: 34, borderRadius: 8, border: 'none',
+    background: 'var(--color-krirk-surface)',
+    color: enabled ? 'var(--color-krirk-text)' : 'var(--color-krirk-muted)',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'background 0.15s',
+  } as React.CSSProperties)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -332,9 +430,7 @@ export function ChatMode({
           messages.map(m => <Bubble key={m.id} msg={m} />)
         )}
 
-        {/* Typing indicator — aparece enquanto AI está "pensando" */}
         {isThinking && <TypingIndicator />}
-
         <div ref={bottomRef} />
       </div>
 
@@ -350,23 +446,38 @@ export function ChatMode({
           onError={handleVoiceError}
           disabled={!connected || aiStateBusy}
         />
+
+        {/* Screenshot */}
         <button
           onClick={handleScreenshot}
           disabled={!connected || aiStateBusy}
           title="Analisar tela"
-          style={{
-            width: 34, height: 34, borderRadius: 8, border: 'none',
-            background: 'var(--color-krirk-surface)',
-            color: connected && !aiStateBusy ? 'var(--color-krirk-text)' : 'var(--color-krirk-muted)',
-            cursor: connected && !aiStateBusy ? 'pointer' : 'not-allowed',
-            fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0, transition: 'background 0.15s',
-          }}
+          style={btnStyle(connected && !aiStateBusy)}
           onMouseEnter={e => { if (connected && !aiStateBusy) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(124,58,237,0.2)' }}
           onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-krirk-surface)'}
         >
-          📷
+          <Camera size={15} />
         </button>
+
+        {/* Upload de imagem */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={handleImageUpload}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!connected || aiStateBusy || !sendImageMessage}
+          title="Enviar imagem"
+          style={btnStyle(connected && !aiStateBusy && !!sendImageMessage)}
+          onMouseEnter={e => { if (connected && !aiStateBusy) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(124,58,237,0.2)' }}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-krirk-surface)'}
+        >
+          <Paperclip size={15} />
+        </button>
+
         <input
           ref={inputRef}
           value={input}
@@ -383,18 +494,19 @@ export function ChatMode({
             fontSize: 13, outline: 'none',
           }}
         />
+
         <button
           onClick={submit}
           disabled={!connected || aiStateBusy || !input.trim()}
+          title="Enviar"
           style={{
-            width: 34, height: 34, borderRadius: 8, border: 'none',
+            ...btnStyle(!!input.trim() && connected && !aiStateBusy),
             background: input.trim() && connected && !aiStateBusy
               ? 'var(--color-krirk-accent)' : 'var(--color-krirk-surface)',
-            color: '#fff', cursor: 'pointer', fontSize: 14,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'background 0.15s', flexShrink: 0,
           }}
-        >▶</button>
+        >
+          <Send size={15} />
+        </button>
       </div>
     </div>
   )
