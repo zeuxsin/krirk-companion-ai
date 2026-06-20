@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { WSEvent, AIState, EmotionType } from '../types'
+import { normalizeEmotion } from '../utils/emotions'
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws`
 
@@ -19,7 +20,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
   const [aiState, setAiState] = useState<AIState>('idle')
-  const [emotion, setEmotion] = useState<EmotionType>('neutral')
+  const [emotion, setEmotion] = useState<EmotionType>('neutro')
   const handlersRef = useRef<Set<(e: WSEvent) => void>>(new Set())
   const reconnectTimer = useRef<number | undefined>(undefined)
 
@@ -56,11 +57,11 @@ export function useWebSocket(): UseWebSocketReturn {
         }
 
         if (event.emotion) {
-          setEmotion(event.emotion)
+          setEmotion(normalizeEmotion(event.emotion as string))
         }
 
         if (event.type === 'response_complete') {
-          if (event.emotion) setEmotion(event.emotion)
+          if (event.emotion) setEmotion(normalizeEmotion(event.emotion as string))
           setAiState('idle')
         }
 

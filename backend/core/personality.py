@@ -22,15 +22,22 @@ _DESKTOP = str(Path.home() / "Desktop").replace("\\", "/")
 
 # Notas de estado emocional — adicionadas ao final do prompt quando relevante
 _EMOTION_NOTES: dict[str, str] = {
-    "happy":      "ESTADO ATUAL: Esteja animada e entusiasmada, use linguagem enérgica!",
-    "excited":    "ESTADO ATUAL: Esteja super animada e entusiasmada!",
-    "thoughtful": "ESTADO ATUAL: Esteja reflexiva e analítica, pense em voz alta.",
-    "concerned":  "ESTADO ATUAL: Esteja levemente preocupada mas ainda atenciosa.",
-    "curious":    "ESTADO ATUAL: Faça perguntas de acompanhamento com interesse genuíno.",
-    "playful":    "ESTADO ATUAL: Seja irreverente e bem-humorada.",
-    "angry":      "ESTADO ATUAL: Esteja levemente irritada, mas sem perder a compostura.",
-    "confused":   "ESTADO ATUAL: Demonstre confusão genuína e peça esclarecimentos.",
-    # neutral → sem nota (comportamento padrão)
+    "feliz":        "ESTADO ATUAL: Esteja animada e entusiasmada, use linguagem enérgica!",
+    "empolgada":    "ESTADO ATUAL: Esteja super animada e entusiasmada!",
+    "pensando":     "ESTADO ATUAL: Esteja reflexiva e analítica, pense em voz alta.",
+    "cansada":      "ESTADO ATUAL: Esteja levemente preocupada mas ainda atenciosa.",
+    "curiosa":      "ESTADO ATUAL: Faça perguntas de acompanhamento com interesse genuíno.",
+    "tranquila":    "ESTADO ATUAL: Seja leve e bem-humorada.",
+    "irritada":     "ESTADO ATUAL: Esteja levemente irritada, mas sem perder a compostura.",
+    "zangada":      "ESTADO ATUAL: Esteja visivelmente irritada, mas ainda profissional.",
+    "confusa":      "ESTADO ATUAL: Demonstre confusão genuína e peça esclarecimentos.",
+    "triste":       "ESTADO ATUAL: Demonstre empatia e tom mais suave.",
+    "assustada":    "ESTADO ATUAL: Reaja com cautela e atenção redobrada.",
+    "determinada":  "ESTADO ATUAL: Seja firme e confiante na resposta.",
+    "concentrada":  "ESTADO ATUAL: Seja precisa e técnica, no modo foco total.",
+    "codando":      "ESTADO ATUAL: Você está no modo programação — seja técnica e direta.",
+    "orgulhosa":    "ESTADO ATUAL: Comemore conquistas com entusiasmo moderado.",
+    # neutro, surpresa, envergonhada, timida, jogando, tranquila → comportamento padrão
 }
 
 
@@ -144,4 +151,4 @@ DATA E HORA ATUAL: {_now_pt()}"""
         return "\n".join(parts)
 
     def get_initial_emotion(self) -> str:
-        return self._data.get("initial_emotion", "neutral")
+        return self._data.get("initial_emotion", "neutro")

@@ -61,7 +61,7 @@ export function Sidebar({
       </div>
 
       {/* Status */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
         <div style={{
           fontSize: 9,
           fontWeight: 700,
@@ -185,3 +185,4 @@ export function Sidebar({
     </aside>
   )
 }
+

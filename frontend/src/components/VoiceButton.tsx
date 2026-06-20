@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import { Mic, Square, Loader } from 'lucide-react'
 
 interface Props {
   sendAudio: (b64Wav: string) => void
@@ -154,10 +155,10 @@ export function VoiceButton({ sendAudio, onError, disabled }: Props) {
 
   // ── Visual ────────────────────────────────────────────────────────────────
 
-  const icon =
-    btnState === 'recording'  ? '⏹' :
-    btnState === 'processing' ? '⏳' :
-    '🎙️'
+  const Icon =
+    btnState === 'recording'  ? Square  :
+    btnState === 'processing' ? Loader  :
+    Mic
 
   const bg =
     btnState === 'recording'  ? '#ef4444' :
@@ -190,7 +191,6 @@ export function VoiceButton({ sendAudio, onError, disabled }: Props) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: '18px',
         transition: 'background 0.15s, box-shadow 0.15s',
         flexShrink: 0,
         boxShadow: glow,
@@ -198,7 +198,7 @@ export function VoiceButton({ sendAudio, onError, disabled }: Props) {
         animation: btnState === 'recording' ? 'pulse 1.2s ease-in-out infinite' : 'none',
       }}
     >
-      {icon}
+      <Icon size={18} style={{ animation: btnState === 'processing' ? 'spin 1s linear infinite' : 'none' }} />
     </button>
   )
 }

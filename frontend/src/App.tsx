@@ -8,6 +8,12 @@ import { HudMode } from './components/HudMode'
 import { CompactHeader } from './components/CompactHeader'
 import { Message, WSEvent } from './types'
 
+// Tauri window API (lazy import — falha silenciosa no browser dev)
+async function tauriWin() {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow()
+}
+
 // ── Audio ─────────────────────────────────────────────────────────────────────
 async function playAudioBase64(b64: string) {
   try {
@@ -23,10 +29,22 @@ async function playAudioBase64(b64: string) {
   } catch (e) { console.warn('[TTS]', e) }
 }
 
-async function adjustWindow(compact: boolean) {
+async function adjustWindow(mode: AppMode) {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('set_compact_mode', { compact })
+    const win = await tauriWin()
+
+    const isCompact = mode === 'sidebar' || mode === 'avatar'
+    const isAvatar  = mode === 'avatar'
+
+    await invoke('set_compact_mode', { compact: isCompact })
+
+    // Chat / Code → decorações nativas (barra de título do Windows)
+    // Sidebar / Avatar → sem decoração (headers customizados)
+    await win.setDecorations(!isCompact)
+
+    // Avatar → fundo transparente para o personagem flutuar sobre o desktop
+    document.body.style.background = isAvatar ? 'transparent' : ''
   } catch (e) {
     console.error('[KRIRK] adjustWindow falhou:', e)
   }
@@ -206,16 +224,29 @@ export default function App() {
 
   // ── Modo & janela ──────────────────────────────────────────────────────────
   const aiStateBusy = aiState !== 'idle'
-  const isCompact = mode === 'sidebar' || mode === 'avatar'
 
-  useEffect(() => { adjustWindow(isCompact) }, [isCompact])
+  useEffect(() => { adjustWindow(mode) }, [mode])
 
   const handleSetMode    = useCallback((m: AppMode) => setMode(m), [])
   const handleOpenSettings = useCallback(() => openSettingsWindow(), [])
   const handleBackToChat = useCallback(() => setMode('chat'), [])
 
-  // ── Modo compacto (Sidebar / Avatar) ──────────────────────────────────────
-  if (isCompact) {
+  // ── Modo Avatar — janela transparente, apenas a personagem ──────────────
+  if (mode === 'avatar') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'transparent', overflow: 'hidden' }}>
+        <AvatarMode
+          emotion={emotion}
+          aiState={aiState}
+          onEvent={onEvent}
+          onBack={handleBackToChat}
+        />
+      </div>
+    )
+  }
+
+  // ── Modo Sidebar (compacto) ───────────────────────────────────────────────
+  if (mode === 'sidebar') {
     return (
       <div style={{
         height: '100vh', display: 'flex', flexDirection: 'column',
@@ -226,27 +257,18 @@ export default function App() {
           connected={connected}
           onBack={handleBackToChat}
         />
-
-        {mode === 'sidebar' && (
-          <HudMode
-            messages={messages}
-            addMsg={addMsg}
-            emotion={emotion}
-            aiState={aiState}
-            connected={connected}
-            aiStateBusy={aiStateBusy}
-            sendMessage={sendMessage}
-            sendAudio={sendAudio}
-          />
-        )}
-
-        {mode === 'avatar' && (
-          <AvatarMode
-            emotion={emotion}
-            aiState={aiState}
-            onEvent={onEvent}
-          />
-        )}
+        <HudMode
+          messages={messages}
+          addMsg={addMsg}
+          emotion={emotion}
+          aiState={aiState}
+          connected={connected}
+          aiStateBusy={aiStateBusy}
+          sendMessage={sendMessage}
+          sendAudio={sendAudio}
+          sendScreenshot={sendScreenshot}
+          sendImageMessage={sendImageMessage}
+        />
       </div>
     )
   }

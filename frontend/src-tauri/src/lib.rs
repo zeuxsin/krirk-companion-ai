@@ -27,31 +27,45 @@ fn close_settings(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn set_compact_mode(window: tauri::WebviewWindow, compact: bool) -> Result<(), String> {
-    use tauri::{LogicalSize, LogicalPosition};
+    use tauri::{LogicalSize, LogicalPosition, PhysicalPosition};
+
+    // Captura o monitor atual ANTES de redimensionar para não mudar de tela
+    let monitor = window.current_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Monitor não encontrado".to_string())?;
+
+    let scale     = monitor.scale_factor();
+    let phys_size = monitor.size();
+    let phys_pos  = monitor.position();
+
+    let sw = phys_size.width  as f64 / scale;
+    let sh = phys_size.height as f64 / scale;
+    // Posição lógica do monitor (canto superior esquerdo)
+    let mx = phys_pos.x as f64 / scale;
+    let my = phys_pos.y as f64 / scale;
 
     if compact {
-        let monitor = window.current_monitor()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Monitor não encontrado".to_string())?;
-
-        let scale = monitor.scale_factor();
-        let phys  = monitor.size();
-        let sw = phys.width  as f64 / scale;
-        let sh = phys.height as f64 / scale;
-
         let (w, h, taskbar) = (230.0_f64, 400.0_f64, 48.0_f64);
-
         window.set_size(LogicalSize::new(w, h))
             .map_err(|e| e.to_string())?;
-        window.set_position(LogicalPosition::new(sw - w - 16.0, sh - h - taskbar))
+        window.set_position(LogicalPosition::new(mx + sw - w - 16.0, my + sh - h - taskbar))
             .map_err(|e| e.to_string())?;
         window.set_always_on_top(true)
             .map_err(|e| e.to_string())?;
     } else {
-        window.set_size(LogicalSize::new(560.0_f64, 420.0_f64))
+        let (w, h) = (560.0_f64, 420.0_f64);
+        let w_phys = (w * scale) as u32;
+        let h_phys = (h * scale) as u32;
+
+        window.set_size(LogicalSize::new(w, h))
             .map_err(|e| e.to_string())?;
-        window.center()
+
+        // Centraliza no monitor atual (não no primário)
+        let cx = phys_pos.x + (phys_size.width.saturating_sub(w_phys) / 2) as i32;
+        let cy = phys_pos.y + (phys_size.height.saturating_sub(h_phys) / 2) as i32;
+        window.set_position(PhysicalPosition::new(cx, cy))
             .map_err(|e| e.to_string())?;
+
         window.set_always_on_top(false)
             .map_err(|e| e.to_string())?;
     }

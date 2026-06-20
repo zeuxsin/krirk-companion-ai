@@ -90,7 +90,7 @@ class MemoryManager:
             if "is_proactive" not in cols:
                 conn.execute("ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0")
 
-    def save_message(self, user_id: str, role: str, content: str, emotion: str = "neutral", is_proactive: bool = False):
+    def save_message(self, user_id: str, role: str, content: str, emotion: str = "neutro", is_proactive: bool = False):
         now = datetime.now().isoformat()
         with self._conn() as conn:
             conn.execute(

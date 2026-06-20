@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { Camera, Paperclip, Send } from 'lucide-react'
 import { EmotionType, AIState, Message } from '../types'
 import { VoiceButton } from './VoiceButton'
 import { EMOTION_COLOR, avatarAnimClass, avatarSrc, avatarFallback } from '../utils/emotions'
@@ -12,13 +13,19 @@ interface Props {
   aiStateBusy: boolean
   sendMessage: (text: string) => void
   sendAudio?: (b64Wav: string) => void
+  sendScreenshot?: (prompt: string) => void
+  sendImageMessage?: (b64: string) => void
 }
 
-export function HudMode({ messages, addMsg, emotion, aiState, connected, aiStateBusy, sendMessage, sendAudio }: Props) {
+export function HudMode({
+  messages, addMsg, emotion, aiState, connected, aiStateBusy,
+  sendMessage, sendAudio, sendScreenshot, sendImageMessage,
+}: Props) {
   const [imgSrc, setImgSrc] = useState(avatarSrc(emotion))
   const [imgOpacity, setImgOpacity] = useState(1)
   const [input, setInput] = useState('')
   const prevEmotion = useRef(emotion)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fade na troca de emoção
   useEffect(() => {
@@ -44,6 +51,34 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
     setInput('')
   }, [input, connected, aiStateBusy, addMsg, sendMessage])
 
+  const handleScreenshot = useCallback(() => {
+    if (!connected || aiStateBusy || !sendScreenshot) return
+    addMsg({ id: `user-${Date.now()}`, role: 'user', content: 'Analisando minha tela...', timestamp: new Date() })
+    sendScreenshot('Descreva o que você vê na minha tela. Seja específica e útil.')
+  }, [connected, aiStateBusy, addMsg, sendScreenshot])
+
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !connected || aiStateBusy) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const b64 = (reader.result as string).split(',')[1]
+      const thumbUrl = reader.result as string
+      addMsg({ id: `user-${Date.now()}`, role: 'user', content: '', thumbnail: thumbUrl, timestamp: new Date() })
+      sendImageMessage?.(b64)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }, [connected, aiStateBusy, addMsg, sendImageMessage])
+
+  const iconBtn = (enabled: boolean) => ({
+    width: 28, height: 28, borderRadius: 6, border: 'none',
+    background: 'var(--color-krirk-surface)',
+    color: enabled ? 'var(--color-krirk-text)' : 'var(--color-krirk-muted)',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0, transition: 'background 0.15s',
+  } as React.CSSProperties)
 
   // Mostra só as últimas 4 mensagens no modo compacto
   const lastMsgs = messages.slice(-4)
@@ -51,7 +86,7 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Avatar centralizado + emoção */}
+      {/* Avatar centralizado */}
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         padding: '12px 8px 8px',
@@ -59,7 +94,6 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
         borderBottom: '1px solid var(--color-krirk-border)',
       }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {/* Anel de brilho */}
           <div style={{
             position: 'absolute',
             width: 130, height: 130,
@@ -122,7 +156,7 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
               color: 'var(--color-krirk-text)',
               lineHeight: 1.5,
             }}>
-              {m.content || (m.thumbnail ? '[screenshot]' : '')}
+              {m.content || (m.thumbnail ? '[imagem]' : '')}
               {m.isStreaming && (
                 <span style={{
                   display: 'inline-block', width: 5, height: 10,
@@ -135,20 +169,61 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
         ))}
       </div>
 
-      {/* Input compacto */}
+      {/* Input em duas linhas */}
       <div style={{
-        padding: '7px 8px',
+        padding: '7px 8px 6px',
         borderTop: '1px solid var(--color-krirk-border)',
-        display: 'flex', gap: 5, alignItems: 'center',
         background: 'var(--color-krirk-sidebar)',
+        display: 'flex', flexDirection: 'column', gap: 5,
       }}>
-        {sendAudio && (
-          <VoiceButton
-            sendAudio={sendAudio}
-            onError={(msg) => addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date() })}
-            disabled={!connected || aiStateBusy}
-          />
-        )}
+        {/* Linha 1: ações */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {sendAudio && (
+            <VoiceButton
+              sendAudio={sendAudio}
+              onError={(msg) => addMsg({ id: `err-${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date() })}
+              disabled={!connected || aiStateBusy}
+            />
+          )}
+
+          <button
+            onClick={handleScreenshot}
+            disabled={!connected || aiStateBusy || !sendScreenshot}
+            title="Analisar tela"
+            style={iconBtn(connected && !aiStateBusy && !!sendScreenshot)}
+          >
+            <Camera size={14} />
+          </button>
+
+          {/* Upload de imagem */}
+          <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageUpload} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!connected || aiStateBusy || !sendImageMessage}
+            title="Enviar imagem"
+            style={iconBtn(connected && !aiStateBusy && !!sendImageMessage)}
+          >
+            <Paperclip size={14} />
+          </button>
+
+          <div style={{ flex: 1 }} />
+
+          <button
+            onClick={submit}
+            disabled={!connected || aiStateBusy || !input.trim()}
+            title="Enviar"
+            style={{
+              ...iconBtn(!!input.trim() && connected && !aiStateBusy),
+              background: input.trim() && connected && !aiStateBusy
+                ? 'var(--color-krirk-accent)' : 'var(--color-krirk-surface)',
+              color: '#fff',
+            }}
+          >
+            <Send size={14} />
+          </button>
+        </div>
+
+        {/* Linha 2: input de texto */}
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -156,25 +231,13 @@ export function HudMode({ messages, addMsg, emotion, aiState, connected, aiState
           placeholder="Digite uma mensagem..."
           disabled={!connected || aiStateBusy}
           style={{
-            flex: 1, padding: '6px 9px', borderRadius: 7,
+            width: '100%', padding: '6px 9px', borderRadius: 7,
             border: '1px solid var(--color-krirk-border)',
             background: 'var(--color-krirk-surface)',
             color: 'var(--color-krirk-text)',
-            fontSize: 11, outline: 'none',
+            fontSize: 11, outline: 'none', boxSizing: 'border-box',
           }}
         />
-        <button
-          onClick={submit}
-          disabled={!connected || aiStateBusy || !input.trim()}
-          style={{
-            width: 28, height: 28, borderRadius: 7, border: 'none',
-            background: input.trim() && connected && !aiStateBusy
-              ? 'var(--color-krirk-accent)' : 'var(--color-krirk-surface)',
-            color: '#fff', cursor: 'pointer', fontSize: 11,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'background 0.15s', flexShrink: 0,
-          }}
-        >▶</button>
       </div>
     </div>
   )

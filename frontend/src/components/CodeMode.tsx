@@ -2,18 +2,18 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Play, Copy, Check, Send } from 'lucide-react'
 import { Message } from '../types'
 
-// ── Paleta PowerShell ─────────────────────────────────────────────────────────
+// ── Paleta Dark (VS Code style) ───────────────────────────────────────────────
 const PS = {
-  bg:       '#012456',
-  bgDeep:   '#0a1628',
-  text:     '#cccccc',
-  prompt:   '#ffff00',
-  output:   '#ffffff',
-  error:    '#ff6b6b',
-  accent:   '#4ec9b0',
-  muted:    'rgba(204,204,204,0.4)',
-  border:   'rgba(78,201,176,0.2)',
-  selection:'rgba(255,255,0,0.15)',
+  bg:       '#1a1a1a',
+  bgDeep:   '#0d0d0d',
+  text:     '#c8c8c8',
+  prompt:   '#c678dd',   // roxo
+  output:   '#e8e8e8',
+  error:    '#f44747',
+  accent:   '#c678dd',   // roxo
+  muted:    'rgba(200,200,200,0.35)',
+  border:   'rgba(198,120,221,0.2)',
+  selection:'rgba(198,120,221,0.1)',
 } as const
 
 const PS_FONT = '"Consolas", "Cascadia Code", "Courier New", monospace'
@@ -70,7 +70,7 @@ function CodeBlock({ lang, content, onExecute }: {
     json:   '#9cdcfe',
     sql:    '#c586c0',
   }
-  const borderColor = langColor[lang] ?? PS.accent
+  const borderColor = langColor[lang] ?? '#e5c07b'
 
   return (
     <div style={{

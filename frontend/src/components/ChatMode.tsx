@@ -14,7 +14,7 @@ const SUGGESTIONS = [
 
 // ─── AvatarChatImg — avatar da Krirk com fallback em cadeia ──────────────────
 function AvatarChatImg({ emotion, isProactive }: { emotion?: EmotionType; isProactive?: boolean }) {
-  const emo = emotion ?? 'neutra'
+  const emo = emotion ?? 'neutro'
   const borderColor = isProactive ? EMOTION_COLOR['tranquila'] : EMOTION_COLOR[emo as EmotionType] ?? '#7c3aed'
 
   const [src, setSrc] = useState(() => avatarChatSrc(emo as EmotionType))
@@ -28,15 +28,10 @@ function AvatarChatImg({ emotion, isProactive }: { emotion?: EmotionType; isProa
   const handleError = () => {
     fallbackStage.current += 1
     if (fallbackStage.current === 1) {
-      // Tenta a pasta principal do avatar
-      const name = emo
-      setSrc(`/avatar/${name}.png`)
-    } else if (fallbackStage.current === 2) {
-      setSrc('/avatar/neutra.png')
-    } else if (fallbackStage.current === 3) {
-      setSrc('/avatar/neutro.png')
+      // Fallback dentro da pasta chat: tenta neutra
+      setSrc('/avatar/chat/neutra.png')
     }
-    // fallbackStage 4+ → deixa a img com o erro (sem loop infinito)
+    // fallbackStage 2+ → deixa a img com o erro (sem loop infinito)
   }
 
   return (
@@ -46,7 +41,7 @@ function AvatarChatImg({ emotion, isProactive }: { emotion?: EmotionType; isProa
       alt={emo}
       title={isProactive ? 'Comentário espontâneo' : undefined}
       style={{
-        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
         objectFit: 'cover',
         border: `2px solid ${isProactive ? borderColor : 'transparent'}`,
         boxShadow: isProactive ? `0 0 6px ${borderColor}66` : 'none',
@@ -62,12 +57,12 @@ function UserAvatarImg() {
   if (showFallback) {
     return (
       <div style={{
-        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
         background: 'rgba(124,58,237,0.2)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         border: '1px solid rgba(124,58,237,0.3)',
       }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.8)" strokeWidth="2">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.8)" strokeWidth="2">
           <circle cx="12" cy="8" r="4"/>
           <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
         </svg>
@@ -81,7 +76,7 @@ function UserAvatarImg() {
       onError={() => setShowFallback(true)}
       alt="Você"
       style={{
-        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+        width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
         objectFit: 'cover',
         border: '1px solid rgba(124,58,237,0.3)',
       }}
@@ -255,7 +250,7 @@ function TypingIndicator() {
     }}>
       <AvatarChatImg emotion="neutra" />
       <div style={{
-        padding: '10px 14px',
+        padding: '10px 14px', marginLeft: 2,
         borderRadius: '16px 16px 16px 4px',
         background: 'rgba(255,255,255,0.06)',
         border: '1px solid var(--color-krirk-border)',

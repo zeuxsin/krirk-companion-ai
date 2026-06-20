@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { CSSProperties } from 'react'
+import { ArrowLeft, Pin, PinOff, X } from 'lucide-react'
 import { EmotionType, AIState, Message, WSEvent } from '../types'
 import {
   EMOTION_COLOR,
@@ -11,15 +13,24 @@ interface Props {
   emotion: EmotionType
   aiState: AIState
   onEvent: (handler: (e: WSEvent) => void) => () => void
+  onBack: () => void
 }
 
-export function AvatarMode({ emotion, aiState, onEvent }: Props) {
+const BUBBLE_BG = 'rgba(20,20,30,0.93)'
+
+async function tauriWin() {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow()
+}
+
+export function AvatarMode({ emotion, aiState, onEvent, onBack }: Props) {
   const [imgSrc, setImgSrc]       = useState(avatarSrc(emotion))
   const [imgOpacity, setImgOpacity] = useState(1)
-  const [lastMessages, setLastMessages] = useState<Message[]>([])
+  const [visibleMsg, setVisibleMsg] = useState<Message | null>(null)
+  const [pinned, setPinned]         = useState(true)
   const prevEmotion = useRef(emotion)
 
-  // Troca de imagem com fade suave ao mudar emoção
+  // Troca de imagem com fade suave
   useEffect(() => {
     if (emotion === prevEmotion.current) return
     prevEmotion.current = emotion
@@ -35,65 +46,191 @@ export function AvatarMode({ emotion, aiState, onEvent }: Props) {
     setImgSrc(src => src.endsWith('.png') ? avatarFallback(emotion) : src)
   }, [emotion])
 
-  // Captura as últimas respostas da Krirk para o speech bubble
+  // Captura a última resposta para o speech bubble
   useEffect(() => {
     const unsub = onEvent((ev: WSEvent) => {
       if (ev.type === 'response_complete' && ev.content) {
-        setLastMessages(prev => [...prev.slice(-2), {
+        setVisibleMsg({
           id: `ai-${Date.now()}`,
           role: 'assistant',
           content: ev.content ?? '',
           timestamp: new Date(),
-        }])
+        })
       }
     })
     return unsub
   }, [onEvent])
 
-  const lastMsg = lastMessages[lastMessages.length - 1]
+  // Auto-dismiss após 8s
+  useEffect(() => {
+    if (!visibleMsg) return
+    const t = setTimeout(() => setVisibleMsg(null), 8000)
+    return () => clearTimeout(t)
+  }, [visibleMsg])
+
+  const togglePin = useCallback(async () => {
+    const next = !pinned
+    setPinned(next)
+    try {
+      const win = await tauriWin()
+      await win.setAlwaysOnTop(next)
+    } catch { /* browser dev */ }
+  }, [pinned])
+
+  const handleBack = useCallback(() => {
+    onBack()
+  }, [onBack])
+
+  const handleClose = useCallback(async () => {
+    try {
+      const win = await tauriWin()
+      await win.hide()
+    } catch { /* browser dev */ }
+  }, [])
+
   const emotionColor = EMOTION_COLOR[emotion]
   const animClass = avatarAnimClass(aiState, emotion)
 
   return (
     <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      background: 'var(--color-krirk-bg)',
-      padding: 24, gap: 16, position: 'relative',
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      background: 'transparent',
+      overflow: 'hidden',
+      position: 'relative',
     }}>
 
-      {/* Speech bubble da última mensagem */}
-      {lastMsg && (
-        <div
-          className="anim-fadein"
-          style={{
-            maxWidth: 280, padding: '10px 14px',
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid var(--color-krirk-border)',
-            borderLeft: `3px solid ${emotionColor}`,
-            borderRadius: '12px 12px 12px 4px',
-            fontSize: 12, lineHeight: 1.6,
-            color: 'var(--color-krirk-text)',
-            marginBottom: -8,
-            transition: 'border-color 0.4s ease',
-          }}
+      {/* Barra de controles — sempre visível no topo */}
+      <div
+        data-tauri-drag-region
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          padding: '6px 8px',
+          gap: 4,
+          background: 'rgba(10,10,16,0.55)',
+          flexShrink: 0,
+          userSelect: 'none',
+        }}
+      >
+        {/* Voltar ao chat */}
+        <button
+          onClick={handleBack}
+          title="Voltar ao chat"
+          style={ctrlBtn('rgba(255,255,255,0.5)')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.5)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.35)')}
         >
-          {lastMsg.content.slice(0, 140)}{lastMsg.content.length > 140 ? '...' : ''}
-        </div>
-      )}
+          <ArrowLeft size={11} />
+        </button>
 
-      {/* Container do avatar com anel de brilho */}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {/* Anel de brilho colorido por emoção */}
+        {/* Emoção atual — pequeno badge */}
+        <span style={{
+          fontSize: 9, fontWeight: 700,
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: emotionColor,
+          flex: 1,
+          paddingLeft: 4,
+          pointerEvents: 'none',
+        }}>
+          {emotion}
+        </span>
+
+        {/* Pin */}
+        <button
+          onClick={togglePin}
+          title={pinned ? 'Desafixar' : 'Fixar sempre no topo'}
+          style={ctrlBtn(pinned ? emotionColor : 'rgba(255,255,255,0.4)')}
+        >
+          {pinned ? <Pin size={11} /> : <PinOff size={11} />}
+        </button>
+
+        {/* Fechar / voltar ao chat */}
+        <button
+          onClick={handleClose}
+          title="Fechar avatar (volta ao chat)"
+          style={ctrlBtn('rgba(255,255,255,0.4)')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.7)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.35)')}
+        >
+          <X size={11} />
+        </button>
+      </div>
+
+      {/* Área do avatar — drag region + glow */}
+      <div
+        data-tauri-drag-region
+        style={{
+          flex: 1,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          position: 'relative',
+          minHeight: 0,
+          cursor: 'move',
+          paddingBottom: 4,
+        }}
+      >
+        {/* Glow radial sob o avatar */}
         <div style={{
           position: 'absolute',
-          width: 250, height: 250,
-          borderRadius: '50%',
-          background: `radial-gradient(circle, ${emotionColor}18 0%, transparent 65%)`,
-          boxShadow: `0 0 50px 10px ${emotionColor}30`,
-          transition: 'background 0.6s ease, box-shadow 0.6s ease',
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '80%',
+          height: '60%',
+          background: `radial-gradient(ellipse at bottom, ${emotionColor}22 0%, transparent 70%)`,
           pointerEvents: 'none',
+          transition: 'background 0.6s ease',
         }} />
+
+        {/* Speech bubble acima do avatar */}
+        {visibleMsg && (
+          <div
+            className="anim-fadein"
+            style={{
+              position: 'absolute',
+              bottom: '60%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              pointerEvents: 'none',
+              width: '85%',
+              maxWidth: 240,
+            }}
+          >
+            <div style={{
+              background: BUBBLE_BG,
+              border: `1px solid ${emotionColor}55`,
+              borderRadius: 10,
+              padding: '8px 12px',
+              fontSize: 11,
+              lineHeight: 1.6,
+              color: '#e4e4e7',
+              textAlign: 'center',
+              boxShadow: `0 4px 16px rgba(0,0,0,0.6)`,
+              width: '100%',
+            }}>
+              {visibleMsg.content.slice(0, 160)}{visibleMsg.content.length > 160 ? '…' : ''}
+            </div>
+            {/* Triângulo apontando para baixo */}
+            <div style={{
+              width: 0, height: 0,
+              borderLeft: '7px solid transparent',
+              borderRight: '7px solid transparent',
+              borderTop: `8px solid ${BUBBLE_BG}`,
+            }} />
+          </div>
+        )}
 
         {/* Avatar */}
         <img
@@ -102,29 +239,37 @@ export function AvatarMode({ emotion, aiState, onEvent }: Props) {
           onError={handleImgError}
           className={animClass}
           style={{
-            width: 220,
-            position: 'relative', zIndex: 1,
+            maxHeight: '100%',
+            maxWidth: '100%',
+            width: 'auto',
+            height: 'auto',
+            objectFit: 'contain',
+            position: 'relative',
+            zIndex: 1,
             opacity: imgOpacity,
             transition: 'opacity 0.15s',
             pointerEvents: 'none',
             filter: aiState === 'speaking'
-              ? `drop-shadow(0 0 14px ${emotionColor}88)`
-              : 'none',
+              ? `drop-shadow(0 0 20px ${emotionColor}aa)`
+              : `drop-shadow(0 4px 12px rgba(0,0,0,0.5))`,
           }}
         />
-      </div>
-
-      {/* Label da emoção */}
-      <div style={{
-        fontSize: 10, fontWeight: 700,
-        letterSpacing: '0.15em',
-        textTransform: 'uppercase',
-        color: emotionColor,
-        marginTop: -8,
-        transition: 'color 0.4s ease',
-      }}>
-        {emotion}
       </div>
     </div>
   )
 }
+
+function ctrlBtn(color: string): CSSProperties {
+  return {
+    width: 22, height: 22, borderRadius: 5,
+    border: 'none',
+    background: 'rgba(0,0,0,0.35)',
+    color,
+    cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 0,
+    transition: 'background 0.15s, color 0.15s',
+    flexShrink: 0,
+  }
+}
+

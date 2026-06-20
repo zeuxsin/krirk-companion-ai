@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react'
+import { Pin, PinOff, ArrowLeft, X } from 'lucide-react'
 import { EmotionType } from '../types'
 import { EMOTION_COLOR } from '../utils/emotions'
 
@@ -6,13 +7,6 @@ interface Props {
   emotion: EmotionType
   connected: boolean
   onBack: () => void
-}
-
-async function tauriInvoke(cmd: string, args?: Record<string, unknown>) {
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke(cmd, args)
-  } catch { /* browser dev — silencia */ }
 }
 
 async function hideWindow() {
@@ -23,12 +17,15 @@ async function hideWindow() {
 }
 
 export function CompactHeader({ emotion, connected, onBack }: Props) {
-  const [pinned, setPinned] = useState(true) // compacto começa always-on-top
+  const [pinned, setPinned] = useState(true)
 
   const togglePin = useCallback(async () => {
     const next = !pinned
     setPinned(next)
-    await tauriInvoke('set_always_on_top', { value: next })
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('set_always_on_top', { value: next })
+    } catch { /* browser dev */ }
   }, [pinned])
 
   return (
@@ -55,71 +52,80 @@ export function CompactHeader({ emotion, connected, onBack }: Props) {
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
         flexShrink: 0,
+        pointerEvents: 'none',
       }}>
         K
       </span>
 
-      {/* Status */}
+      {/* Status dot */}
       <span style={{
         width: 6, height: 6, borderRadius: '50%',
         background: EMOTION_COLOR[emotion],
         boxShadow: `0 0 5px ${EMOTION_COLOR[emotion]}`,
         flexShrink: 0,
+        pointerEvents: 'none',
       }} />
+
+      {/* Emoção */}
       <span style={{
         fontSize: 9, color: 'var(--color-krirk-muted)',
         textTransform: 'uppercase', letterSpacing: '0.08em',
         flex: 1,
+        pointerEvents: 'none',
       }}>
         {emotion}
       </span>
 
       {/* Indicador de conexão */}
-      <span style={{
-        width: 5, height: 5, borderRadius: '50%',
-        background: connected ? 'var(--color-krirk-online)' : 'var(--color-krirk-offline)',
-        flexShrink: 0,
-      }} title={connected ? 'online' : 'offline'} />
+      <span
+        title={connected ? 'online' : 'offline'}
+        style={{
+          width: 5, height: 5, borderRadius: '50%',
+          background: connected ? 'var(--color-krirk-online)' : 'var(--color-krirk-offline)',
+          flexShrink: 0,
+        }}
+      />
 
-      {/* Botão pin */}
+      {/* Fixar / desafixar */}
       <button
         onClick={togglePin}
         title={pinned ? 'Desafixar' : 'Fixar sempre no topo'}
-        style={btnStyle(pinned ? '#a78bfa' : 'rgba(255,255,255,0.3)')}
+        style={btn(pinned ? '#a78bfa' : 'rgba(255,255,255,0.35)')}
       >
-        📌
+        {pinned ? <Pin size={11} /> : <PinOff size={11} />}
       </button>
 
-      {/* Voltar para Chat */}
+      {/* Voltar ao chat */}
       <button
         onClick={onBack}
         title="Voltar ao modo Chat"
-        style={btnStyle('rgba(255,255,255,0.5)')}
+        style={btn('rgba(255,255,255,0.5)')}
+        onMouseEnter={e => (e.currentTarget.style.color = '#a78bfa')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.5)')}
       >
-        ⬡
+        <ArrowLeft size={11} />
       </button>
 
-      {/* Fechar / ocultar janela */}
+      {/* Ocultar para bandeja */}
       <button
         onClick={hideWindow}
         title="Ocultar (reabre pelo ícone na bandeja)"
-        style={btnStyle('rgba(255,255,255,0.3)')}
+        style={btn('rgba(255,255,255,0.35)')}
         onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.3)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}
       >
-        ×
+        <X size={11} />
       </button>
     </div>
   )
 }
 
-function btnStyle(color: string): React.CSSProperties {
+function btn(color: string): React.CSSProperties {
   return {
     background: 'none',
     border: 'none',
     color,
     cursor: 'pointer',
-    fontSize: 12,
     padding: '0 2px',
     display: 'flex',
     alignItems: 'center',

@@ -522,7 +522,7 @@ class Orchestrator:
         yield {
             "type": "response_complete",
             "content": clean_response,
-            "emotion": "neutral",
+            "emotion": "neutro",
             "audio": None,   # Sem TTS no Modo Coder
         }
         yield {"type": "status", "state": "idle"}
