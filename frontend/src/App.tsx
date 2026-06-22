@@ -149,6 +149,15 @@ export default function App() {
           ))
         }
         if (ev.audio) playAudioBase64(ev.audio)
+        // Envia a mensagem para o speech bubble da janela float
+        if (ev.content) {
+          ;(async () => {
+            try {
+              const { emit } = await import('@tauri-apps/api/event')
+              await emit('krirk-update', { message: ev.content })
+            } catch { /* browser dev */ }
+          })()
+        }
         return
       }
       if (ev.type === 'proactive_comment' && ev.content) {
@@ -222,6 +231,16 @@ export default function App() {
     return unsub
   }, [onEvent, addMsg, appendToken, finalizeMsg])
 
+  // ── Sincroniza emoção/estado com a janela float independente ──────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const { emit } = await import('@tauri-apps/api/event')
+        await emit('krirk-update', { emotion, aiState })
+      } catch { /* browser dev */ }
+    })()
+  }, [emotion, aiState])
+
   // ── Modo & janela ──────────────────────────────────────────────────────────
   const aiStateBusy = aiState !== 'idle'
 
@@ -230,6 +249,14 @@ export default function App() {
   const handleSetMode    = useCallback((m: AppMode) => setMode(m), [])
   const handleOpenSettings = useCallback(() => openSettingsWindow(), [])
   const handleBackToChat = useCallback(() => setMode('chat'), [])
+
+  const handleDetachAvatar = useCallback(async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_avatar_float')
+    } catch { /* browser dev */ }
+    setMode('chat')
+  }, [])
 
   // ── Modo Avatar — janela transparente, apenas a personagem ──────────────
   if (mode === 'avatar') {
@@ -240,6 +267,7 @@ export default function App() {
           aiState={aiState}
           onEvent={onEvent}
           onBack={handleBackToChat}
+          onDetach={handleDetachAvatar}
         />
       </div>
     )

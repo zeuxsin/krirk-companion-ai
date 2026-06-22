@@ -248,7 +248,7 @@ function TypingIndicator() {
     <div className="anim-fadein" style={{
       display: 'flex', gap: 8, marginBottom: 10, alignItems: 'flex-end',
     }}>
-      <AvatarChatImg emotion="neutra" />
+      <AvatarChatImg emotion="neutro" />
       <div style={{
         padding: '10px 14px', marginLeft: 2,
         borderRadius: '16px 16px 16px 4px',

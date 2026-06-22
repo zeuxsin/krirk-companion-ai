@@ -43,6 +43,20 @@
         "skipTaskbar": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "krirk-float",
+        "title": "KRIRK",
+        "url": "/?window=float",
+        "width": 230,
+        "height": 400,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "shadow": false
       }
     ],
     "security": {

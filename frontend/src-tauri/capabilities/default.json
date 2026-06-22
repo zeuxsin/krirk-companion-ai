@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Permissões padrão para as janelas do KRIRK",
-  "windows": ["main", "settings"],
+  "windows": ["main", "settings", "krirk-float"],
   "permissions": [
     "core:default",
     "core:window:allow-set-decorations",

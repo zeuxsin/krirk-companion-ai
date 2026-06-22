@@ -26,6 +26,40 @@ fn close_settings(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn open_avatar_float(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::LogicalPosition;
+    if let Some(w) = app.get_webview_window("krirk-float") {
+        // Posiciona no canto inferior direito do monitor da janela principal
+        if let Some(main_win) = app.get_webview_window("main") {
+            if let Ok(Some(monitor)) = main_win.current_monitor() {
+                let scale     = monitor.scale_factor();
+                let phys_size = monitor.size();
+                let phys_pos  = monitor.position();
+                let sw = phys_size.width  as f64 / scale;
+                let sh = phys_size.height as f64 / scale;
+                let mx = phys_pos.x as f64 / scale;
+                let my = phys_pos.y as f64 / scale;
+                let (fw, fh, taskbar) = (230.0_f64, 400.0_f64, 48.0_f64);
+                let _ = w.set_position(LogicalPosition::new(
+                    mx + sw - fw - 16.0,
+                    my + sh - fh - taskbar,
+                ));
+            }
+        }
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn close_avatar_float(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("krirk-float") {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
 fn set_compact_mode(window: tauri::WebviewWindow, compact: bool) -> Result<(), String> {
     use tauri::{LogicalSize, LogicalPosition, PhysicalPosition};
 
@@ -107,6 +141,8 @@ pub fn run() {
             set_always_on_top,
             open_settings,
             close_settings,
+            open_avatar_float,
+            close_avatar_float,
             set_compact_mode,
             is_window_visible,
             hide_to_tray,
@@ -178,6 +214,10 @@ pub fn run() {
                     api.prevent_close();
                 }
                 if label == "settings" {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                if label == "krirk-float" {
                     let _ = window.hide();
                     api.prevent_close();
                 }
