@@ -93,6 +93,10 @@ export default function App() {
     setMessages(p => [...p, msg])
   }, [])
 
+  const addCodeMsg = useCallback((msg: Message) => {
+    setCodeMessages(p => [...p, msg])
+  }, [])
+
   const appendToken = useCallback((id: string, token: string) => {
     const setter = activeSessionRef.current === 'code' ? setCodeMessages : setMessages
     setter(p => p.map(m => m.id === id ? { ...m, content: m.content + token } : m))
@@ -142,7 +146,8 @@ export default function App() {
           const id = streamingIdRef.current
           streamingIdRef.current = null
           // Substitui conteúdo streamado pela versão limpa (sem reasoning tags)
-          setMessages(p => p.map(m =>
+          const setter = activeSessionRef.current === 'code' ? setCodeMessages : setMessages
+          setter(p => p.map(m =>
             m.id === id
               ? { ...m, content: ev.content ?? m.content, isStreaming: false, emotion: ev.emotion as never }
               : m
@@ -321,7 +326,7 @@ export default function App() {
         {mode === 'code' ? (
           <CodeMode
             messages={codeMessages}
-            addMsg={addMsg}
+            addMsg={addCodeMsg}
             sendCodeMessage={sendCodeMessage}
             connected={connected}
             aiStateBusy={aiStateBusy}
@@ -329,7 +334,7 @@ export default function App() {
         ) : (
           <ChatMode
             messages={messages}
-            addMsg={addMsg}
+            addMsg={addChatMsg}
             sendMessage={sendMessage}
             sendAudio={sendAudio}
             sendScreenshot={sendScreenshot}
