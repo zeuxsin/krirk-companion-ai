@@ -1,115 +1,65 @@
-# KRIRK — Companion AI Desktop
+# CLAUDE.md — Instruções para sessões de desenvolvimento
 
-Projeto de Companion AI Desktop inspirado em Neuro-sama/Monica/HakkoAI.
-SDD completo em: `docs/SDD.pdf` (copie o PDF original para cá).
+> Leia `PROJECT_CONTEXT.md` primeiro — é a memória técnica completa do projeto.
 
-## Stack
+## O que é
 
-| Camada | Tecnologia |
-|--------|-----------|
-| Backend | Python 3.11+ / FastAPI / WebSockets |
-| LLM | Ollama local (qwen2.5:7b padrão) |
-| TTS | edge-tts (pt-BR-FranciscaNeural) |
-| STT | faster-whisper (desabilitado em Py3.14) |
-| Memória | SQLite (short/long term) |
-| Frontend | React + TypeScript + Vite |
-| Avatar | (Fase 2 — Live2D/WebGL) |
+KRIRK — Companion AI de desktop (FastAPI + React/Tauri v2), local-first com
+fallback cloud. Single-user. Detalhes de arquitetura no PROJECT_CONTEXT.md.
 
-## Estrutura
+## Comandos essenciais
 
-```
-KRIRK/
-├── backend/
-│   ├── core/          # Orquestrador, personalidade, estado
-│   ├── api/           # FastAPI app + WebSocket handler
-│   ├── memory/        # SQLite memory manager
-│   ├── voice/         # STT (faster-whisper) + TTS (edge-tts)
-│   ├── emotions/      # Máquina de estados emocional
-│   ├── agents/        # (Fase 4) Agentes de automação
-│   ├── tools/         # (Fase 4) Tool calling
-│   └── vision/        # (Fase 3) Visão computacional
-├── frontend/          # React + TypeScript + Vite
-├── configs/
-│   ├── config.yaml    # Configuração principal
-│   └── personality.json  # Personalidade da Krirk
-├── data/              # DB SQLite (não versionado)
-├── logs/              # Logs (não versionados)
-└── models/            # Modelos locais (não versionados)
+```powershell
+.venv\Scripts\python.exe main.py           # backend :8000
+cd frontend; npm run dev                   # frontend browser :5173
+cd frontend; npm run tauri dev             # app desktop
+cd frontend; npx tsc --noEmit              # checagem de tipos (rodar após TODA mudança TS)
+.venv\Scripts\python.exe -m compileall backend main.py -q   # sintaxe Python
 ```
 
-## Rodando o projeto
+A suite `tests\test_krirk.py` faz chamadas REAIS às APIs cloud e ao Ollama —
+só rodar com autorização do usuário.
 
-### 1. Backend
+## Regras obrigatórias
 
-```bash
-# Instalar dependências (usar Python 3.11 recomendado)
-pip install -r requirements.txt
+1. **Segredos**: chaves de API vivem SOMENTE em `.env` (gitignored). NUNCA
+   hardcodar, logar, exibir ou commitar valores de chaves.
+2. **Emoções**: exatamente 20, em português, definidas em
+   `frontend/src/types/index.ts` e `backend/emotions/emotion_engine.py`.
+   Ao adicionar/renomear: atualizar AMBOS + `utils/emotions.ts` (IMG/COLOR/ANIM)
+   + PNGs em `public/avatar/` e `public/avatar/chat/`.
+3. **Ícones**: lucide-react. Nunca emoji ou SVG inline na UI.
+4. **Idioma**: UI, respostas da IA e comentários de código em pt-BR.
+5. **Históricos separados**: chat usa `addChatMsg`/`messages`; coder usa
+   `addCodeMsg`/`codeMessages`. Streaming usa `activeSessionRef`. Não
+   reintroduzir um `addMsg` compartilhado em componentes.
+6. **Tauri**: toda API de janela nova exige permissão em
+   `capabilities/default.json` (falha silenciosa se faltar). Novas janelas:
+   `tauri.conf.json` + array `windows` das capabilities.
+7. **Posicionamento de janela**: usar `current_monitor()` no Rust; nunca
+   `window.center()` (quebra dual-monitor).
+8. **Providers**: novos modelos/providers entram em
+   `backend/providers/router.py` (TASK_MODELS/TASK_FALLBACK) e
+   `configs/config.yaml`; nunca chumbar modelo em outro lugar.
 
-# Copiar e editar .env
-cp .env.example .env
+## Não alterar sem necessidade explícita
 
-# Garantir que o Ollama está rodando com o modelo correto
-ollama pull qwen2.5:7b
-ollama serve
+- `_stream_strip_reasoning` (orchestrator.py) — filtro de tags `<think>`.
+- Pipeline de 2 fases do orchestrator (tool routing → resposta).
+- `_safe_path` em file_tools.py (restrição de segurança ao home).
+- `.gitignore` de `data/` e `.env`.
 
-# Iniciar backend
-python main.py
-```
+## Erros comuns a evitar
 
-### 2. Frontend
+- Esquecer `npx tsc --noEmit` após editar TS (noUnusedLocals pega variável morta).
+- Adicionar chamada de janela Tauri sem a permissão correspondente → falha
+  silenciosa, difícil de debugar.
+- Usar nomes de emoção em inglês (legado removido; `normalizeEmotion()` só
+  existe para compatibilidade com dados antigos do banco).
+- Commitar `data/` (contém memória pessoal do usuário).
+- PowerShell 5.1: sem `&&`, sem heredoc bash — usar here-strings `@'…'@` para
+  mensagens de commit multilinhas.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## Componentes legados (não usados, não deletar sem confirmar)
 
-Acesse: http://localhost:5173
-
-### 3. WebSocket direto (teste)
-
-```
-ws://localhost:8000/ws
-```
-
-Mensagens:
-```json
-// Enviar texto
-{"type": "chat", "content": "Oi Krirk!"}
-
-// Enviar áudio (base64 webm)
-{"type": "audio", "data": "<base64>"}
-
-// Checar status
-{"type": "status"}
-```
-
-## Configuração do Ollama
-
-Edite `configs/config.yaml` para mudar o modelo:
-
-```yaml
-ollama:
-  model: "qwen2.5:7b"      # Recomendado
-  # model: "llama3.2:3b"   # Mais leve
-  # model: "mistral:7b"    # Alternativa
-  # model: "deepseek-r1:7b" # Com reasoning
-```
-
-## Roadmap (do SDD)
-
-- [x] **Fase 1** — MVP Conversacional (chat + TTS + memória + personalidade)
-- [x] **Fase 2** — Companion AI (avatar flutuante + 9 emoções + animações CSS + draggable)
-- [ ] **Fase 3** — Multimodalidade (visão + OCR + leitura de tela)
-- [ ] **Fase 4** — Sistema Agente (controle do PC + automação + web)
-- [ ] **Fase 5** — Memória Avançada (vetorial + semântica)
-- [ ] **Fase 6** — Ecossistema (plugins + API pública)
-
-## Notas importantes
-
-- **Python 3.14**: faster-whisper pode não ter wheels. Use `stt.enabled: false` em config.yaml ou instale Python 3.11/3.12 em venv separado.
-- **edge-tts**: requer conexão com internet para gerar áudio (TTS).
-- **Ollama**: deve estar rodando em `http://localhost:11434` antes de iniciar o backend.
-- **Dados do usuário**: `data/memory.db` não é versionado no git (dados pessoais).
-- **Voz (STT)**: usa Web Speech API do browser — requer **Chrome ou Edge**. Brave, Firefox e outros não suportam. A API também precisa de internet (envia áudio para o Google/Microsoft).
-- **Avatar**: imagens em `frontend/public/avatar/`. Coloque seus PNGs com os nomes: `neutro.png`, `animada.png`, `irritada.png`, `pensando.png`, `cansada.png`, `surpresa.png`, `confusa.png`, `curiosa.png`. SVGs placeholder existem como fallback.
+`ChatWindow.tsx`, `MessageBubble.tsx`, `AvatarWidget.tsx`, `EmotionIndicator.tsx`.

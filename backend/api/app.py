@@ -1,5 +1,6 @@
 import json
 import yaml
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,28 +36,14 @@ def _save_settings(patch: dict) -> None:
 def create_app() -> FastAPI:
     config = load_config()
 
-    app = FastAPI(
-        title="KRIRK Companion AI",
-        description="Backend da Companion AI KRIRK — Fase 1 MVP",
-        version="0.1.0",
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=config["server"]["cors_origins"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     orchestrator = Orchestrator(config)
 
     # Monitor proativo — inicia loop de observação de tela e Spotify
     proactive_cfg = config.get("proactive", {"enabled": False})
     proactive_monitor = ProactiveMonitor(orchestrator, ws_manager, proactive_cfg)
 
-    @app.on_event("startup")
-    async def _startup():
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         set_proactive_monitor(proactive_monitor)
         # Aplica configurações salvas em sessões anteriores
         saved = _load_saved_settings()
@@ -66,6 +53,22 @@ def create_app() -> FastAPI:
             if "stt_enabled"       in saved: orchestrator.stt.set_enabled(bool(saved["stt_enabled"]))
             if "proactive_enabled" in saved: proactive_monitor.set_enabled(bool(saved["proactive_enabled"]))
         await proactive_monitor.start()
+        yield
+
+    app = FastAPI(
+        title="KRIRK Companion AI",
+        description="Backend da Companion AI KRIRK — Fase 1 MVP",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config["server"]["cors_origins"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     async def health():

@@ -1,0 +1,189 @@
+# PROJECT_CONTEXT.md — Memória técnica do KRIRK
+
+> Atualizado em 2026-06-22 (commit `f1c007f`). Este arquivo é a referência para
+> futuras sessões de desenvolvimento. Atualize-o quando a arquitetura mudar.
+
+## Visão geral
+
+KRIRK é uma **Companion AI de desktop** (inspiração: Neuro-sama / Hakko AI):
+assistente com personalidade própria, voz, memória persistente, emoções visuais
+e controle do PC do usuário. Local-first (Ollama), com fallback para APIs cloud
+gratuitas. Single-user (`user_id` fixo `"default"`).
+
+## Stack
+
+| Camada | Tecnologia | Onde |
+|---|---|---|
+| Backend | Python 3.14 (venv `.venv`) + FastAPI + WebSocket | `backend/`, `main.py` |
+| LLM routing | Multi-provider: NVIDIA NIM → Google → Cerebras → Ollama | `backend/providers/` |
+| LLM local | Ollama (gemma3:4b chat, qwen2.5-coder:7b tools/code, nomic-embed-text) | `configs/config.yaml` |
+| TTS | edge-tts `pt-BR-FranciscaNeural` (requer internet) | `backend/voice/tts.py` |
+| STT | faster-whisper CPU, modelo "base", local | `backend/voice/stt.py` |
+| Memória | SQLite (`data/memory.db`) + ChromaDB (`data/chroma/`) | `backend/memory/` |
+| Frontend | React 18 + TypeScript + Vite (porta 5173) | `frontend/src/` |
+| Desktop | Tauri v2 (Rust) — 3 janelas: main, settings, krirk-float | `frontend/src-tauri/` |
+| Ícones UI | lucide-react (NUNCA emojis na UI) | — |
+| Visão | mss + Pillow (screenshot) → modelo de visão | `backend/vision/capture.py` |
+
+## Arquitetura e fluxo principal
+
+```
+Frontend (React/Tauri)
+   │  WebSocket ws://localhost:8000/ws  (JSON events)
+   ▼
+backend/api/websocket.py  → dispatch por payload.type:
+   chat | code_chat | audio | screenshot | image_chat | settings | status
+   ▼
+backend/core/orchestrator.py  — pipeline de 2 fases:
+   FASE 1: _decide_tool() → router.complete("tools", …) → qual ferramenta usar (JSON ou "none")
+   FASE 2: router.stream("chat"|"code", …) → resposta final streamada token a token
+   + background tasks (asyncio.create_task): extract_facts_bg, update_profile_bg,
+     extract_kg_bg, _summarize_history_bg
+   ▼
+backend/providers/router.py — ProviderRouter com fallback automático
+   TASK_FALLBACK: chat=[nvidia,google,cerebras,ollama], tools=[nvidia,ollama], …
+   Erros retriables (429/5xx/timeout/not found) caem para o próximo provider
+```
+
+### Eventos WebSocket (backend → frontend)
+
+`connected` (com history), `status` (state), `token`, `response_complete`
+(content + emotion + audio b64), `tool_call`, `tool_result`, `transcription`,
+`screenshot_taken` (thumbnail), `proactive_comment`, `error`, `ack`, `memory_stats`.
+
+### Frontend — modos e janelas
+
+- `App.tsx` mantém dois históricos separados: `messages` (chat) e `codeMessages`
+  (coder). `activeSessionRef` decide para onde vão tokens em streaming;
+  `addChatMsg`/`addCodeMsg` são passados aos componentes (NÃO usar o antigo
+  `addMsg` genérico em componentes de UI — causou bug de mensagens cruzadas).
+- Modos: `chat` (janela normal 560×420, decorações nativas), `code` (mesma
+  janela), `sidebar` (compacta 230×400, sem decoração, `CompactHeader` +
+  `HudMode`), `avatar` (sem decoração + fundo transparente, `AvatarMode`).
+- `adjustWindow(mode)` em App.tsx: invoke `set_compact_mode` (Rust) →
+  `setDecorations` → body background.
+- **Janela float independente** (`krirk-float` no tauri.conf.json):
+  `AvatarFloat.tsx`, renderizada quando `?window=float`. Sincroniza via evento
+  Tauri `krirk-update` ({emotion, aiState, message}) emitido pelo App.
+  Comandos Rust: `open_avatar_float` / `close_avatar_float`.
+- Janela settings: `?window=settings` → `SettingsPage.tsx`.
+
+### Emoções — 20 nomes canônicos em PORTUGUÊS
+
+`neutro, surpresa, pensando, curiosa, cansada, irritada, confusa, feliz,
+empolgada, triste, zangada, assustada, envergonhada, timida, concentrada,
+orgulhosa, determinada, codando, jogando, tranquila`
+
+- Fonte da verdade frontend: `frontend/src/types/index.ts` (EmotionType) +
+  `frontend/src/utils/emotions.ts` (EMOTION_TO_IMG, EMOTION_COLOR, EMOTION_ANIM,
+  `normalizeEmotion()` converte nomes ingleses legados).
+- Fonte backend: `backend/emotions/emotion_engine.py` (EMOTION_KEYWORDS).
+- Imagens: `frontend/public/avatar/{nome}.png` (modo avatar/hud) e
+  `frontend/public/avatar/chat/{nome}.png` (avatares 38×38 nas mensagens).
+  Mesmos 20 nomes nas duas pastas. Fallback onError → neutro.
+
+## Memória (backend/memory/)
+
+- `memory_manager.py` — SQLite: messages (com `is_proactive`), facts,
+  user_profile, conversation_summaries + fachada para KG e vector store.
+- `knowledge_graph.py` — relações entidade→verbo→entidade em SQLite.
+- `profile_manager.py` — perfil estruturado (nome, profissão, interesses…).
+- `vector_store.py` — ChromaDB + embeddings nomic-embed-text.
+- Context management: histórico acima de ~3000 tokens → recorte para 8 recentes
+  + resumo salvo (gerado em background).
+
+## Ferramentas (backend/tools/)
+
+- `registry.py` (build_default_registry, filtra pela whitelist do config.yaml),
+  `executor.py` (timeout 10s), `base.py` (classe Tool).
+- Builtin: system_tools (powershell, clipboard, janela ativa…), file_tools
+  (read/write/list/search com `_safe_path` restrito ao home + PATH_ALIASES
+  "desktop"/"documentos"…), desktop_tools (open_url com aliases+TLD completion,
+  open_app com busca em PATH/Program Files/registry, set_timer, volume),
+  web_tools (ddgs), media_tools, memory_tools (search_memory),
+  code_tools (execute_python, subprocess com timeout 8s).
+- Whitelist em `configs/config.yaml → tools.whitelist`.
+
+## Configuração
+
+- `configs/config.yaml` — modelos, TTS/STT, memória, proativo, providers, tools.
+- `configs/personality.json` — nome da Krirk, emoção inicial, notas custom.
+- `.env` (**NUNCA commitar, NUNCA ler/exibir valores**): `NVIDIA_API_KEY`,
+  `GOOGLE_API_KEY`, `CEREBRAS_API_KEY`, e opcionais BACKEND_HOST/PORT etc.
+- `data/settings.json` — settings persistidos em runtime (TTS on/off, voz,
+  proativo). Gitignored. Aplicado no startup em `app.py`.
+
+## Comandos
+
+```powershell
+# Backend (Terminal 1)
+cd C:\Krirk_AI\KRIRK
+.venv\Scripts\python.exe main.py          # http://localhost:8000
+
+# Frontend browser dev (Terminal 2)
+cd frontend; npm run dev                   # http://localhost:5173
+
+# App desktop completo
+cd frontend; npm run tauri dev
+
+# Build release
+cd frontend; npm run tauri build
+
+# Validações
+cd frontend; npx tsc --noEmit                                  # tipos TS
+.venv\Scripts\python.exe -m compileall backend main.py -q      # sintaxe Python
+.venv\Scripts\python.exe tests\test_krirk.py                   # suite (26 testes;
+#   ATENÇÃO: faz chamadas reais às APIs NVIDIA/Google/Cerebras e ao Ollama)
+```
+
+## Convenções obrigatórias
+
+- Respostas da Krirk e UI em **pt-BR**; código/comentários em pt-BR.
+- Ícones: **lucide-react**, nunca emoji/SVG inline na UI.
+- Estilos: inline styles React (objetos JS) + CSS vars `--color-krirk-*`
+  definidas em `index.css`. Sem styled-components/Tailwind.
+- TS estrito: `noUnusedLocals`/`noUnusedParameters` ativos; JSX transform
+  `react-jsx` (não importar React em arquivos só-JSX).
+- Tauri: novas permissões vão em `frontend/src-tauri/capabilities/default.json`
+  (falhas de permissão são SILENCIOSAS — sempre verificar lá primeiro).
+- Novas janelas Tauri: declarar em `tauri.conf.json` E no array `windows` das
+  capabilities.
+- Commits: mensagens em pt-BR sem acentos no título, prefixos feat/fix/docs.
+
+## Decisões técnicas a preservar
+
+1. **Pipeline 2 fases** (router de tools separado do modelo de personalidade) —
+   não fundir em um único modelo com function calling nativo sem discussão.
+2. **Fallback multi-provider** com `_is_retriable` — novos providers entram em
+   `TASK_MODELS`/`TASK_FALLBACK` no router.py + factory em openai_compat.py.
+3. **Históricos chat/coder separados no frontend**, mas MESMA tabela SQLite no
+   backend (o coder lê as últimas 8 do pool comum). Cuidado ao mexer.
+4. **`_stream_strip_reasoning`** filtra tags `<think>` em streaming — necessário
+   para Google/Gemma; não remover.
+5. **Transparência da janela**: `transparent: true` fixo no tauri.conf.json;
+   o visual é controlado via `document.body.style.background` por modo.
+6. **Dual-monitor**: `set_compact_mode` usa `current_monitor()` +
+   `PhysicalPosition` — nunca usar `window.center()` (vai para o monitor primário).
+
+## Problemas conhecidos / dívidas
+
+- **Componentes legados não usados**: `ChatWindow.tsx`, `MessageBubble.tsx`,
+  `AvatarWidget.tsx`, `EmotionIndicator.tsx` (nenhum import ativo). Não deletar
+  sem confirmar com o usuário.
+- **Emoções legadas no banco**: mensagens antigas em `data/memory.db` podem ter
+  emotion em inglês; `normalizeEmotion()` no frontend cobre isso.
+- `pasta /avatar/chat/` contém `neutra.png` (nome antigo) — o código usa
+  `neutro`; verificar/renomear quando o usuário trocar as imagens.
+- Endpoints REST de memória (`/api/memory/*`) não têm autenticação — aceitável
+  para app local single-user, mas não expor a rede.
+- `app.py` usa `@app.on_event("startup")` (deprecado no FastAPI moderno; migrar
+  para lifespan handler eventualmente).
+- Sem testes do frontend; suite Python depende de rede/chaves.
+- `react-router-dom` está nas dependências mas não é usado (roteamento é via
+  query param `?window=`).
+
+## Funcionalidades pendentes (roadmap)
+
+- Live2D/lip-sync no avatar (Fase 2 completa do SDD).
+- OCR avançado (Fase 3), Playwright/automação (Fase 4), plugins (Fase 6).
+- Pasta `plugins/` e `backend/agents/` existem mas estão vazias (placeholders).
