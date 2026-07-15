@@ -18,10 +18,12 @@ from .ollama_prov import OllamaProvider
 
 TASK_MODELS: dict[str, dict[str, str]] = {
     "nvidia": {
-        "chat":   "meta/llama-3.3-70b-instruct",
+        # llama-3.3-70b e outros meta/llama estão com timeout crônico no free tier;
+        # mistral-small-4-119b (MoE) responde em ~3s e é o único NVIDIA confiável (2026-07)
+        "chat":   "mistralai/mistral-small-4-119b-2603",
         "tools":  "mistralai/mistral-small-4-119b-2603",
         "code":   "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "ocr":    "microsoft/phi-4-multimodal-instruct",
+        "ocr":    "meta/llama-3.2-11b-vision-instruct",   # phi-4-multimodal foi removido (410)
         "vision": "meta/llama-3.2-11b-vision-instruct",
         "embed":  "nvidia/nv-embedqa-e5-v5",
         "safety": "meta/llama-guard-4-12b",
@@ -58,7 +60,8 @@ TASK_FALLBACK: dict[str, list[str]] = {
 }
 
 # Erros que ativam fallback para o próximo provider
-_RETRIABLE_CODES = (400, 404, 422, 429, 500, 502, 503, 504)
+# 403 (sem acesso ao modelo) e 410 (modelo removido) também caem para o próximo
+_RETRIABLE_CODES = (400, 403, 404, 410, 422, 429, 500, 502, 503, 504)
 
 
 def _is_retriable(exc: Exception) -> bool:
@@ -88,6 +91,8 @@ def _is_retriable(exc: Exception) -> bool:
         or "does not exist" in msg
         or "invalid model" in msg
         or "no such model" in msg
+        or "gone" in msg
+        or "unavailable" in msg
     )
 
 

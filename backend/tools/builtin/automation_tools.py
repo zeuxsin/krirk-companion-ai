@@ -198,19 +198,31 @@ def _html_to_text(html: str) -> str:
     return parser.get_text()
 
 
+def _ssl_context():
+    """SSLContext usando o certificate store nativo do SO (igual aos providers)."""
+    import ssl
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:
+        return ssl.create_default_context()
+
+
 async def _fetch_url(url: str, max_chars: int = 4000) -> str:
     url = url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:
-        import requests
+        import httpx
 
-        def _get():
-            return requests.get(
-                url, timeout=8,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KRIRK/0.1"},
-            )
-        resp = await asyncio.to_thread(_get)
+        async with httpx.AsyncClient(
+            verify=_ssl_context(),
+            timeout=httpx.Timeout(12.0, connect=5.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KRIRK/0.1"},
+        ) as client:
+            resp = await client.get(url)
+
         if resp.status_code >= 400:
             return f"[Erro] HTTP {resp.status_code} ao acessar {url}"
 

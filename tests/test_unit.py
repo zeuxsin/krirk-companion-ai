@@ -369,6 +369,33 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 9. Router — classificação de erros retriable (fallback de provider)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("9. Router _is_retriable")
+
+from backend.providers.router import _is_retriable
+
+
+class _FakeStatusError(Exception):
+    def __init__(self, status_code, msg=""):
+        super().__init__(msg or f"Error code: {status_code}")
+        self.status_code = status_code
+        # simula o nome de classe do SDK openai
+        self.__class__.__name__ = "APIStatusError"
+
+
+check("410 Gone e retriable (modelo removido)", _is_retriable(_FakeStatusError(410, "Gone")))
+check("403 Forbidden e retriable (sem acesso)", _is_retriable(_FakeStatusError(403)))
+check("429 rate limit e retriable", _is_retriable(_FakeStatusError(429)))
+check("503 unavailable e retriable", _is_retriable(_FakeStatusError(503)))
+check("mensagem 'Gone' e retriable", _is_retriable(Exception("The model is Gone")))
+check("timeout e retriable", _is_retriable(Exception("Request timed out.")))
+check("401 NAO e retriable (chave invalida)", not _is_retriable(_FakeStatusError(401)))
+check("erro generico NAO e retriable", not _is_retriable(ValueError("bug qualquer")))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

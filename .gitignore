@@ -26,10 +26,8 @@ env/
 logs/*.log
 logs/*.jsonl
 
-# Data (user data, não versionado)
-data/*.db
-data/*.json
-data/*.pkl
+# Data (user data + índices gerados, nada versionado)
+data/
 
 # Models (arquivos grandes)
 models/*.bin
