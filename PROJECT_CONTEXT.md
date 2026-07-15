@@ -166,8 +166,11 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
    não fundir em um único modelo com function calling nativo sem discussão.
 2. **Fallback multi-provider** com `_is_retriable` — novos providers entram em
    `TASK_MODELS`/`TASK_FALLBACK` no router.py + factory em openai_compat.py.
-3. **Históricos chat/coder separados no frontend**, mas MESMA tabela SQLite no
-   backend (o coder lê as últimas 8 do pool comum). Cuidado ao mexer.
+3. **Históricos chat/coder isolados de ponta a ponta**: frontend usa
+   `messages`/`codeMessages`; backend usa a coluna `session` ('chat'|'code')
+   na tabela messages. O Coder grava/lê só session='code'; mensagens de
+   código não são indexadas no ChromaDB. `connected` envia `history` +
+   `code_history`.
 4. **`_stream_strip_reasoning`** filtra tags `<think>` em streaming — necessário
    para Google/Gemma; não remover.
 5. **Transparência da janela**: `transparent: true` fixo no tauri.conf.json;
