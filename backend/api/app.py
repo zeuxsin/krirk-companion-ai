@@ -196,6 +196,52 @@ def create_app() -> FastAPI:
 
         return {"ok": True}
 
+    # ── API pública (Fase 6) — integração com scripts e apps externos ────────
+
+    @app.post("/api/chat")
+    async def api_chat(request: Request):
+        """
+        Envia uma mensagem à KRIRK e retorna a resposta completa (sem streaming).
+        Body: {"message": str, "user_id"?: str, "include_audio"?: bool}
+        """
+        body = await request.json()
+        message = (body.get("message") or "").strip()
+        if not message:
+            return {"error": "campo 'message' é obrigatório"}
+
+        user_id = body.get("user_id", "default")
+        result = {"response": "", "emotion": "neutro", "tools_used": []}
+
+        async for ev in orchestrator.process_text(message, user_id=user_id):
+            if ev.get("type") == "tool_call":
+                result["tools_used"].append(ev.get("tool"))
+            elif ev.get("type") == "response_complete":
+                result["response"] = ev.get("content", "")
+                result["emotion"] = ev.get("emotion", "neutro")
+                if body.get("include_audio") and ev.get("audio"):
+                    result["audio"] = ev["audio"]
+
+        return result
+
+    @app.get("/api/tools")
+    async def api_tools():
+        """Lista as ferramentas registradas (builtin + plugins)."""
+        reg = orchestrator.tool_registry
+        if not reg:
+            return {"tools": []}
+        return {"tools": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "params": [
+                    {"name": p.name, "type": p.type, "required": p.required,
+                     "description": p.description}
+                    for p in t.params
+                ],
+            }
+            for t in reg.all()
+        ]}
+
     @app.websocket("/ws")
     async def websocket_anon(websocket: WebSocket):
         # ID fixo "default" — app single-user, garante que memórias persistem entre sessões

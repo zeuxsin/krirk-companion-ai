@@ -83,10 +83,12 @@ providers:
       code:  "llama3.1-70b"
   ollama:
     models:
-      chat:  "gemma3:4b"
-      tools: "qwen2.5-coder:7b"
-      code:  "qwen2.5-coder:7b"
-      embed: "nomic-embed-text"
+      chat:   "gemma3:4b"
+      tools:  "qwen2.5-coder:7b"
+      code:   "qwen2.5-coder:7b"
+      embed:  "nomic-embed-text"
+      vision: "gemma3:4b"     # gemma3 é multimodal — fallback local de visão
+      ocr:    "gemma3:4b"
 
 tools:
   enabled: true
@@ -117,3 +119,16 @@ tools:
     - set_timer
     - execute_python   # executa snippets Python localmente (Modo Coder)
     - write_file       # salva arquivos dentro do home do usuário (Desktop, Documents, etc.)
+    # ── Fase 3: visão ──
+    - read_screen      # OCR da tela via modelo de visão (NVIDIA phi-4 → gemma3 local)
+    # ── Fase 4: automação ──
+    - press_hotkey     # atalhos de teclado (ctrl+s, alt+tab, win+d...)
+    - type_text        # digita texto na janela ativa
+    - list_windows     # lista janelas abertas
+    - focus_window     # traz uma janela para frente
+    - fetch_url        # lê o conteúdo de uma página web (texto)
+
+# ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
+plugins:
+  enabled: true
+  dir: "plugins"       # cada .py deve expor register(registry) — veja plugins/exemplo_dado.py

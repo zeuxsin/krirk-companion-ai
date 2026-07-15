@@ -213,6 +213,107 @@ check("20 PNGs presentes em /avatar/chat/", not missing_chat, f"faltando: {missi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5. Plugin loader (Fase 6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("5. Plugin loader")
+
+from backend.tools.registry import ToolRegistry
+from backend.tools.plugin_loader import load_plugins
+
+tmp_plugins = Path(tempfile.mkdtemp(prefix="krirk_plug_"))
+try:
+    # Plugin válido
+    (tmp_plugins / "bom.py").write_text(
+        "from backend.tools.base import Tool\n"
+        "def register(registry):\n"
+        "    async def _f() -> str: return 'ok'\n"
+        "    registry.register(Tool(name='plugin_tool', description='teste', func=_f))\n",
+        encoding="utf-8",
+    )
+    # Plugin quebrado (erro de sintaxe) — não pode derrubar os outros
+    (tmp_plugins / "quebrado.py").write_text("def register(:\n", encoding="utf-8")
+    # Plugin sem register() — ignorado
+    (tmp_plugins / "sem_register.py").write_text("X = 1\n", encoding="utf-8")
+    # Arquivo _privado — ignorado
+    (tmp_plugins / "_interno.py").write_text(
+        "def register(r): raise RuntimeError('nao deveria carregar')\n", encoding="utf-8",
+    )
+
+    reg = ToolRegistry()
+    loaded = load_plugins(reg, str(tmp_plugins))
+
+    check("plugin valido carregado", loaded == ["bom"], f"loaded={loaded}")
+    check("tool do plugin registrada", reg.get("plugin_tool") is not None)
+    check("plugin quebrado isolado (nao derruba o loader)", "quebrado" not in loaded)
+    check("registry.all() retorna as tools", len(reg.all()) == 1)
+
+    # Executor consegue chamar a tool do plugin
+    from backend.tools.executor import ToolExecutor
+    ex = ToolExecutor(reg, timeout=5)
+    res = asyncio.run(ex.execute_from_json('{"tool": "plugin_tool", "params": {}}'))
+    check("executor executa tool de plugin", res == "ok", res)
+
+    check("diretorio inexistente retorna []", load_plugins(ToolRegistry(), str(tmp_plugins / "nao_existe")) == [])
+finally:
+    shutil.rmtree(tmp_plugins, ignore_errors=True)
+
+# Plugin de exemplo real do projeto
+reg2 = ToolRegistry()
+loaded2 = load_plugins(reg2, str(Path(__file__).parent.parent / "plugins"))
+check("plugins/exemplo_dado.py carrega", "exemplo_dado" in loaded2, f"loaded={loaded2}")
+check("roll_dice registrada", reg2.get("roll_dice") is not None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Automação (Fase 4) — funções puras, sem tocar teclado/rede
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("6. Automacao (funcoes puras)")
+
+from backend.tools.builtin.automation_tools import _parse_hotkey, _html_to_text
+
+check("parse 'ctrl+shift+s'", _parse_hotkey("ctrl+shift+s") == ["ctrl", "shift", "s"])
+check("parse normaliza aliases", _parse_hotkey("Control+Windows+Escape") == ["ctrl", "win", "esc"])
+check("parse ignora vazios", _parse_hotkey(" alt + tab ") == ["alt", "tab"])
+
+html = """
+<html><head><title>x</title><style>body{color:red}</style>
+<script>alert(1)</script></head>
+<body><nav>menu ruim</nav>
+<h1>Título Principal</h1>
+<p>Primeiro parágrafo com <b>negrito</b>.</p>
+<p>Segundo   parágrafo.</p>
+<footer>rodapé ruim</footer></body></html>
+"""
+text = _html_to_text(html)
+check("html: extrai titulo e paragrafos", "Título Principal" in text and "Primeiro parágrafo" in text)
+check("html: remove script/style", "alert" not in text and "color:red" not in text)
+check("html: remove nav/footer", "menu ruim" not in text and "rodapé ruim" not in text)
+check("html: preserva texto inline", "negrito" in text)
+check("html malformado nao explode", isinstance(_html_to_text("<div><p>abc"), str))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Provider multimodal (Fase 3) — conversao de formato, sem rede
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("7. Conversao multimodal OpenAI")
+
+from backend.providers.openai_compat import _to_openai_messages
+
+plain = [{"role": "user", "content": "oi"}]
+check("mensagem sem imagem passa intacta", _to_openai_messages(plain) == [{"role": "user", "content": "oi"}])
+
+with_img = [{"role": "user", "content": "o que ve?", "images": ["QUJD"]}]
+conv = _to_openai_messages(with_img)[0]
+check("content vira lista de blocos", isinstance(conv["content"], list) and len(conv["content"]) == 2)
+check("bloco de texto preservado", conv["content"][0] == {"type": "text", "text": "o que ve?"})
+check("imagem vira data URI", conv["content"][1]["image_url"]["url"] == "data:image/png;base64,QUJD")
+check("chave 'images' removida da saida", "images" not in conv)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

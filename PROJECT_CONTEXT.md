@@ -35,7 +35,9 @@ backend/api/websocket.py  → dispatch por payload.type:
    chat | code_chat | audio | screenshot | image_chat | settings | status
    ▼
 backend/core/orchestrator.py  — pipeline de 2 fases:
-   FASE 1: _decide_tool() → router.complete("tools", …) → qual ferramenta usar (JSON ou "none")
+   FASE 1: loop de agente — _decide_tool() é chamado até max_rounds (config: 4) vezes;
+     cada rodada recebe os resultados anteriores e escolhe a PRÓXIMA tool ou "none".
+     Guardas: decisão repetida → break; resultado "[Erro]" → break.
    FASE 2: router.stream("chat"|"code", …) → resposta final streamada token a token
    + background tasks (asyncio.create_task): extract_facts_bg, update_profile_bg,
      extract_kg_bg, _summarize_history_bg
@@ -94,15 +96,23 @@ orgulhosa, determinada, codando, jogando, tranquila`
 
 ## Ferramentas (backend/tools/)
 
-- `registry.py` (build_default_registry, filtra pela whitelist do config.yaml),
-  `executor.py` (timeout 10s), `base.py` (classe Tool).
+- `registry.py` (build_default_registry(config, memory, router), filtra pela
+  whitelist do config.yaml), `executor.py` (timeout padrão 10s; `Tool.timeout`
+  sobrescreve por-tool), `base.py` (classe Tool), `plugin_loader.py` (Fase 6).
 - Builtin: system_tools (powershell, clipboard, janela ativa…), file_tools
   (read/write/list/search com `_safe_path` restrito ao home + PATH_ALIASES
   "desktop"/"documentos"…), desktop_tools (open_url com aliases+TLD completion,
   open_app com busca em PATH/Program Files/registry, set_timer, volume),
   web_tools (ddgs), media_tools, memory_tools (search_memory),
-  code_tools (execute_python, subprocess com timeout 8s).
+  code_tools (execute_python, subprocess com timeout 8s),
+  **vision_tools** (read_screen: OCR da tela via task "ocr" do router, timeout 60s),
+  **automation_tools** (press_hotkey/type_text via pyautogui — type_text usa
+  clipboard+ctrl+v para texto não-ASCII; list_windows/focus_window via PowerShell;
+  fetch_url via requests + HTMLParser stdlib).
 - Whitelist em `configs/config.yaml → tools.whitelist`.
+- **Plugins (Fase 6)**: `plugins/*.py` com `register(registry)` são carregados no
+  boot (config `plugins.enabled`). NÃO passam pela whitelist. Erros isolados
+  por plugin. Exemplo: `plugins/exemplo_dado.py` (roll_dice).
 
 ## Configuração
 
@@ -182,8 +192,25 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
 - `react-router-dom` está nas dependências mas não é usado (roteamento é via
   query param `?window=`).
 
+## Visão multimodal (Fase 3)
+
+- Imagens viajam nas mensagens como chave `"images": [b64, ...]`.
+- Ollama aceita o formato nativamente; `openai_compat._to_openai_messages()`
+  converte para content-array (image_url data URI) para NVIDIA/Google/Cerebras.
+- Rota de visão: router task "vision" (NVIDIA llama-3.2-vision → Ollama gemma3);
+  OCR: task "ocr" (NVIDIA phi-4-multimodal → gemma3).
+- `capture.py`: capture_screen(monitor), capture_region(l,t,w,h), capture_thumbnail.
+- Timeout de rede sobe para 45s automaticamente quando a mensagem tem imagens.
+
+## API pública (Fase 6)
+
+- `POST /api/chat` {message, user_id?, include_audio?} → {response, emotion,
+  tools_used[], audio?} — resposta completa, sem streaming, para integrações.
+- `GET /api/tools` → lista de tools registradas (builtin + plugins) com params.
+
 ## Funcionalidades pendentes (roadmap)
 
 - Live2D/lip-sync no avatar (Fase 2 completa do SDD).
-- OCR avançado (Fase 3), Playwright/automação (Fase 4), plugins (Fase 6).
-- Pasta `plugins/` e `backend/agents/` existem mas estão vazias (placeholders).
+- Playwright para automação de browser completa (opcional — fetch_url cobre
+  leitura de páginas; dependência comentada no requirements.txt).
+- `backend/agents/` ainda vazio (orquestração multi-agente futura).
