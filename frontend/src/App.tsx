@@ -114,13 +114,22 @@ export default function App() {
     const unsub = onEvent((ev: WSEvent) => {
       if (ev.type === 'connected') {
         if (ev.history && ev.history.length > 0) {
-          // Restaura conversa anterior
+          // Restaura conversa anterior do chat
           setMessages(ev.history.map((m, i) => ({
             id: `history-${i}`,
             role: m.role as 'user' | 'assistant',
             content: m.content,
             timestamp: new Date(),
             isProactive: Boolean(m.is_proactive),
+          })))
+        }
+        if (ev.code_history && ev.code_history.length > 0) {
+          // Restaura histórico do Modo Coder (sessão separada no backend)
+          setCodeMessages(ev.code_history.map((m, i) => ({
+            id: `code-history-${i}`,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: new Date(),
           })))
         }
         // Sem mensagem de saudação — histórico fala por si

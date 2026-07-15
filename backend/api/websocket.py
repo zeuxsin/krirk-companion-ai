@@ -52,14 +52,14 @@ async def handle_websocket(
 ):
     await manager.connect(websocket, client_id)
 
-    # Carrega histórico recente do usuário e envia ao frontend
-    history = orchestrator.memory.get_recent_messages(
-        client_id,
-        limit=orchestrator._config["memory"]["short_term_limit"],
-    )
+    # Carrega históricos recentes (chat e coder — sessões separadas) e envia ao frontend
+    limit = orchestrator._config["memory"]["short_term_limit"]
+    history = orchestrator.memory.get_recent_messages(client_id, limit=limit)
+    code_history = orchestrator.memory.get_recent_messages(client_id, limit=limit, session="code")
     await manager.send(client_id, {
         "type": "connected",
-        "history": history,   # [{role, content}, ...] — vazio na primeira vez
+        "history": history,             # sessão chat — vazio na primeira vez
+        "code_history": code_history,   # sessão code (Modo Coder)
         "status": orchestrator.get_status(),
     })
 

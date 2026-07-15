@@ -51,7 +51,8 @@ class MemoryManager:
                     user_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    emotion TEXT DEFAULT 'neutral',
+                    emotion TEXT DEFAULT 'neutro',
+                    session TEXT DEFAULT 'chat',
                     created_at TEXT NOT NULL
                 );
 
@@ -85,17 +86,28 @@ class MemoryManager:
                 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
             """)
-            # Migration: adiciona is_proactive se não existir (banco legado)
+            # Migrations: adicionam colunas se não existirem (banco legado)
             cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
             if "is_proactive" not in cols:
                 conn.execute("ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0")
+            if "session" not in cols:
+                # Mensagens antigas eram todas do chat
+                conn.execute("ALTER TABLE messages ADD COLUMN session TEXT DEFAULT 'chat'")
 
-    def save_message(self, user_id: str, role: str, content: str, emotion: str = "neutro", is_proactive: bool = False):
+    def save_message(
+        self,
+        user_id: str,
+        role: str,
+        content: str,
+        emotion: str = "neutro",
+        is_proactive: bool = False,
+        session: str = "chat",
+    ):
         now = datetime.now().isoformat()
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO messages (user_id, role, content, emotion, is_proactive, created_at) VALUES (?,?,?,?,?,?)",
-                (user_id, role, content, emotion, int(is_proactive), now)
+                "INSERT INTO messages (user_id, role, content, emotion, is_proactive, session, created_at) VALUES (?,?,?,?,?,?,?)",
+                (user_id, role, content, emotion, int(is_proactive), session, now)
             )
             conn.execute(
                 """INSERT INTO user_profile (user_id, total_messages, first_seen, last_seen)
@@ -106,23 +118,24 @@ class MemoryManager:
                 (user_id, now, now)
             )
 
-        # Indexa no ChromaDB para busca semântica
-        if self._vectors:
+        # Indexa no ChromaDB para busca semântica (código não vira memória semântica)
+        if self._vectors and session == "chat":
             doc_id = f"msg-{user_id}-{uuid.uuid4().hex[:12]}"
             self._vectors.add(doc_id, content, {
                 "user_id": user_id,
                 "type": "message",
                 "role": role,
                 "emotion": emotion,
+                "session": session,
             })
 
-    def get_recent_messages(self, user_id: str, limit: int = 20) -> list[dict]:
+    def get_recent_messages(self, user_id: str, limit: int = 20, session: str = "chat") -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
                 """SELECT role, content, is_proactive FROM messages
-                   WHERE user_id = ?
+                   WHERE user_id = ? AND session = ?
                    ORDER BY id DESC LIMIT ?""",
-                (user_id, limit)
+                (user_id, session, limit)
             ).fetchall()
         return [
             {"role": r["role"], "content": r["content"], "is_proactive": bool(r["is_proactive"])}

@@ -44,7 +44,8 @@ export interface WSEvent {
   message?: string
   audio?: string
   thumbnail?: string  // base64 JPEG (evento screenshot_taken)
-  history?: { role: string; content: string; is_proactive?: number }[]  // histórico de mensagens ao conectar
+  history?: { role: string; content: string; is_proactive?: number }[]  // histórico do chat ao conectar
+  code_history?: { role: string; content: string; is_proactive?: number }[]  // histórico do Modo Coder ao conectar
   tool?: string       // nome da ferramenta (eventos tool_call / tool_result)
   raw?: string        // JSON bruto do tool_call
   result?: string     // resultado da execução (tool_result)

@@ -518,10 +518,11 @@ class Orchestrator:
         self.state.set(AISystemState.THINKING)
         yield {"type": "status", "state": "thinking"}
 
-        # Histórico recente do usuário (mesmo pool do chat normal)
+        # Histórico próprio do Modo Coder — sessão isolada do chat
         history = self.memory.get_recent_messages(
             user_id,
-            limit=self._config["memory"]["short_term_limit"]
+            limit=self._config["memory"]["short_term_limit"],
+            session="code",
         )
 
         system = (
@@ -571,8 +572,8 @@ class Orchestrator:
                 "content": "Explique o resultado acima de forma clara e objetiva.",
             })
 
-        # Salva mensagem do usuário na memória (mesma base de dados)
-        self.memory.save_message(user_id, "user", message)
+        # Salva na sessão "code" — não polui o histórico do chat
+        self.memory.save_message(user_id, "user", message, session="code")
 
         self.state.set(AISystemState.SPEAKING)
         yield {"type": "status", "state": "speaking"}
@@ -583,7 +584,7 @@ class Orchestrator:
             yield {"type": "token", "content": token}
 
         clean_response = _strip_reasoning(full_response)
-        self.memory.save_message(user_id, "assistant", clean_response)
+        self.memory.save_message(user_id, "assistant", clean_response, session="code")
 
         self.state.set(AISystemState.IDLE)
         yield {

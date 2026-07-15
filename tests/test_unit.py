@@ -314,6 +314,61 @@ check("chave 'images' removida da saida", "images" not in conv)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 8. Isolamento de sessão chat/code (MemoryManager)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("8. Isolamento de sessao chat/code")
+
+tmp3 = Path(tempfile.mkdtemp(prefix="krirk_sess_"))
+try:
+    mm2 = MemoryManager(
+        db_path=str(tmp3 / "test.db"),
+        chroma_path=str(tmp3 / "chroma"),
+    )
+    mm2._vectors = None
+    UID2 = "sess-user"
+
+    mm2.save_message(UID2, "user", "mensagem do chat")                      # session padrão = chat
+    mm2.save_message(UID2, "user", "def foo(): pass", session="code")
+    mm2.save_message(UID2, "assistant", "código explicado", session="code")
+
+    chat_msgs = mm2.get_recent_messages(UID2)                # padrão = chat
+    code_msgs = mm2.get_recent_messages(UID2, session="code")
+
+    check("chat ve so a sessao chat", len(chat_msgs) == 1 and chat_msgs[0]["content"] == "mensagem do chat")
+    check("code ve so a sessao code", len(code_msgs) == 2)
+    check("code em ordem cronologica", code_msgs[0]["content"] == "def foo(): pass")
+    check("sessao inexistente retorna []", mm2.get_recent_messages(UID2, session="outra") == [])
+
+    # Migration: banco criado sem a coluna session recebe DEFAULT 'chat'
+    import sqlite3
+    legacy_db = tmp3 / "legacy.db"
+    conn = sqlite3.connect(legacy_db)
+    conn.executescript("""
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+            emotion TEXT DEFAULT 'neutral', created_at TEXT NOT NULL
+        );
+        INSERT INTO messages (user_id, role, content, created_at)
+        VALUES ('legacy-user', 'user', 'mensagem antiga', '2026-01-01');
+    """)
+    conn.commit()
+    conn.close()
+
+    mm3 = MemoryManager(db_path=str(legacy_db), chroma_path=str(tmp3 / "chroma2"))
+    mm3._vectors = None
+    legacy_msgs = mm3.get_recent_messages("legacy-user")
+    check("migration: mensagens legadas viram sessao chat",
+          len(legacy_msgs) == 1 and legacy_msgs[0]["content"] == "mensagem antiga")
+    mm3.save_message("legacy-user", "user", "novo codigo", session="code")
+    check("migration: banco legado aceita sessao code",
+          len(mm3.get_recent_messages("legacy-user", session="code")) == 1)
+finally:
+    shutil.rmtree(tmp3, ignore_errors=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 
