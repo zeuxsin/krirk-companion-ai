@@ -121,7 +121,16 @@ class Orchestrator:
             try:
                 from backend.tools.registry import build_default_registry
                 from backend.tools.executor import ToolExecutor
-                self.tool_registry = build_default_registry(self._tool_cfg, memory=self.memory)
+                self.tool_registry = build_default_registry(
+                    self._tool_cfg, memory=self.memory, router=self.router
+                )
+
+                # Plugins de terceiros (Fase 6) — plugins/*.py com register(registry)
+                plugins_cfg = config.get("plugins", {})
+                if plugins_cfg.get("enabled", True):
+                    from backend.tools.plugin_loader import load_plugins
+                    load_plugins(self.tool_registry, plugins_cfg.get("dir", "plugins"))
+
                 self.tool_executor = ToolExecutor(
                     self.tool_registry,
                     timeout=self._tool_cfg.get("timeout_seconds", 10),
@@ -140,26 +149,16 @@ class Orchestrator:
     ) -> AsyncGenerator[str, None]:
         """Chat com personalidade — usa task 'chat' no router."""
         if images:
-            # Visão ainda vai direto no Ollama (suporte multimodal local)
-            try:
-                import ollama
-                client = ollama.AsyncClient(host=self._ollama_config["base_url"])
-                msgs = [m.copy() for m in messages]
-                msgs[-1] = {**msgs[-1], "images": images}
-                async for chunk in await client.chat(
-                    model=self._ollama_config["model"],
-                    messages=msgs,
-                    stream=True,
-                    options={
-                        "temperature": self._ollama_config["temperature"],
-                        "num_predict": self._ollama_config["max_tokens"],
-                    }
-                ):
-                    content = chunk.get("message", {}).get("content", "")
-                    if content:
-                        yield content
-            except Exception as e:
-                yield f"[Erro de visão: {e}]"
+            # Visão via router: NVIDIA (llama-3.2-vision) → Ollama (gemma3 multimodal)
+            msgs = [m.copy() for m in messages]
+            msgs[-1] = {**msgs[-1], "images": images}
+            raw_stream = self.router.stream(
+                "vision", msgs,
+                temperature=self._ollama_config["temperature"],
+                max_tokens=self._ollama_config["max_tokens"],
+            )
+            async for token in _stream_strip_reasoning(raw_stream):
+                yield token
             return
 
         raw_stream = self.router.stream(
@@ -192,9 +191,16 @@ class Orchestrator:
 
     # ── Decisão de tool (Fase 1) ──────────────────────────────────────────────
 
-    async def _decide_tool(self, message: str, history: list | None = None) -> dict | None:
+    async def _decide_tool(
+        self,
+        message: str,
+        history: list | None = None,
+        executed: list[tuple[str, str]] | None = None,
+    ) -> dict | None:
         """
-        Usa qwen2.5-coder para decidir QUAL ferramenta usar, se alguma.
+        Usa o modelo de roteamento para decidir QUAL ferramenta usar, se alguma.
+        executed: ferramentas já executadas NESTA requisição [(nome, resultado)] —
+        permite o loop de agente encadear passos até completar o pedido.
         Retorna dict {"tool": str, "params": dict} ou None se nenhuma tool for necessária.
         """
         if not (self.tool_registry and self.tool_executor):
@@ -214,12 +220,24 @@ class Orchestrator:
             if lines:
                 history_context = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
 
+        # Passos já executados nesta requisição (loop de agente)
+        executed_context = ""
+        if executed:
+            lines = [f"- {name}: {result[:200]}" for name, result in executed]
+            executed_context = (
+                "Tools ALREADY EXECUTED for this request (with results):\n"
+                + "\n".join(lines)
+                + "\nIf these results already fulfill the user's request, respond: none\n"
+                "Otherwise, choose the NEXT tool needed to continue.\n\n"
+            )
+
         planning_prompt = (
             "You are a tool router for a desktop AI assistant. "
             "Analyze the user's message and decide which tool to use, if any.\n\n"
             f"User home directory: {_HOME}\n\n"
             f"Available tools:\n{tool_desc}\n\n"
             f"{history_context}"
+            f"{executed_context}"
             f"User message: {message}\n\n"
             "Rules:\n"
             "- If a tool is needed, respond with ONLY valid JSON (no markdown, no explanation):\n"
@@ -240,6 +258,11 @@ class Orchestrator:
             "NEVER use open_file for websites. Pass only the domain or URL, not a file path.\n"
             "- open_app: use for desktop applications/programs (Notepad, Spotify, Chrome, VS Code, etc.).\n"
             "- set_timer: use when the user asks for a timer, countdown, or reminder with a time duration.\n"
+            "- fetch_url: use to READ the text content of a SPECIFIC page/site. "
+            "web_search: to SEARCH the internet when no specific URL is known.\n"
+            "- read_screen: use when the user asks to read/check/transcribe what is on their screen.\n"
+            "- Multi-step requests may need a SEQUENCE of tools (e.g. open_app then type_text). "
+            "Choose only the FIRST/NEXT step now; you will be asked again for the following step.\n"
         )
 
         raw = await self.router.complete(
@@ -311,12 +334,27 @@ class Orchestrator:
             min_score = self._vector_cfg.get("min_score", 0.45)
             semantic_memories = [r["text"] for r in raw if r["score"] >= min_score]
 
-        # ── FASE 1: Roteamento via qwen2.5-coder ─────────────────────────────
+        # ── FASE 1: Loop de agente — encadeia até max_rounds ferramentas ──────
         tool_result_context = ""
+        executed_tools: list[tuple[str, str]] = []
         if self._tool_cfg.get("enabled", False) and self.tool_executor:
-            tool_decision = await self._decide_tool(message, history)
+            max_rounds = self._tool_cfg.get("max_rounds", 4)
+            prev_decision_json = None
 
-            if tool_decision:
+            for _round in range(max_rounds):
+                tool_decision = await self._decide_tool(
+                    message, history, executed=executed_tools or None
+                )
+                if not tool_decision:
+                    break
+
+                # Guarda contra loop: mesma tool + mesmos params da rodada anterior
+                decision_json = json.dumps(tool_decision, sort_keys=True)
+                if decision_json == prev_decision_json:
+                    print("[KRIRK][agent] Decisão repetida — encerrando loop.")
+                    break
+                prev_decision_json = decision_json
+
                 tool_name = tool_decision.get("tool", "ferramenta")
 
                 self.state.set(AISystemState.EXECUTING)
@@ -326,13 +364,29 @@ class Orchestrator:
                 result = await self.tool_executor.execute_from_json(
                     json.dumps(tool_decision)
                 )
-                print(f"[KRIRK][tools] {tool_name} → {result[:150]}")
+                print(f"[KRIRK][agent] round {_round + 1}/{max_rounds}: {tool_name} → {result[:150]}")
                 yield {"type": "tool_result", "tool": tool_name, "result": result}
 
-                tool_result_context = (
-                    f"Consultei {tool_name} e o resultado foi:\n\n"
-                    f"{result}"
-                )
+                executed_tools.append((tool_name, result))
+
+                # Erro na tool → não insiste em mais rodadas, deixa o modelo explicar
+                if result.startswith("[Erro]"):
+                    break
+
+            if executed_tools:
+                if len(executed_tools) == 1:
+                    tool_result_context = (
+                        f"Consultei {executed_tools[0][0]} e o resultado foi:\n\n"
+                        f"{executed_tools[0][1]}"
+                    )
+                else:
+                    parts_txt = "\n\n".join(
+                        f"[{name}]\n{result}" for name, result in executed_tools
+                    )
+                    tool_result_context = (
+                        f"Executei {len(executed_tools)} ferramentas em sequência. Resultados:\n\n"
+                        f"{parts_txt}"
+                    )
 
         # ── FASE 2: Resposta final via gemma3 ─────────────────────────────────
         # Perfil estruturado do usuário (nome, profissão, etc.)
@@ -371,7 +425,13 @@ class Orchestrator:
             # Instrução de resposta varia por tipo de tool:
             # web_search → resumo natural dos resultados
             # outros     → resposta curta e direta
-            tool_name_used = tool_decision.get("tool", "") if tool_decision else ""
+            executed_names = [name for name, _ in executed_tools]
+            if "web_search" in executed_names:
+                tool_name_used = "web_search"
+            elif "search_memory" in executed_names:
+                tool_name_used = "search_memory"
+            else:
+                tool_name_used = executed_names[-1] if executed_names else ""
             if tool_name_used in ("web_search", "search_memory"):
                 if tool_name_used == "web_search":
                     followup_instruction = (
@@ -387,6 +447,13 @@ class Orchestrator:
                         "Cite o que foi dito anteriormente com precisão. "
                         "Se as memórias não respondem diretamente à pergunta, diga que não encontrou registros claros sobre isso."
                     )
+            elif len(executed_tools) > 1:
+                followup_instruction = (
+                    f"O usuário pediu: \"{message}\"\n"
+                    "Você executou os passos acima em sequência. Confirme em português, "
+                    "de forma natural e breve, o que foi feito e o resultado final. "
+                    "Se algum passo falhou, explique qual e por quê."
+                )
             else:
                 followup_instruction = (
                     f"O usuário perguntou: \"{message}\"\n"

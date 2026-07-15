@@ -18,6 +18,10 @@ class ToolRegistry:
     def list_names(self) -> list[str]:
         return list(self._tools.keys())
 
+    def all(self) -> list[Tool]:
+        """Todas as tools registradas (usado pela API pública /api/tools)."""
+        return list(self._tools.values())
+
     def get_descriptions(self) -> str:
         """
         Retorna um bloco de texto pronto para ser injetado no system prompt,
@@ -31,10 +35,11 @@ class ToolRegistry:
         return "\n".join(lines)
 
 
-def build_default_registry(config: dict, memory=None) -> ToolRegistry:
+def build_default_registry(config: dict, memory=None, router=None) -> ToolRegistry:
     """
     Instancia e registra as ferramentas padrão conforme a whitelist do config.
     Importa as tools sob demanda para evitar dependências circulares.
+    router: ProviderRouter — necessário para tools que usam LLM (ex: read_screen).
     """
     whitelist: list[str] = config.get("whitelist", [])
     registry = ToolRegistry()
@@ -155,6 +160,37 @@ def build_default_registry(config: dict, memory=None) -> ToolRegistry:
                 registry.register(make_search_memory(memory))
         except Exception as e:
             print(f"[KRIRK][tools] Erro ao carregar memory_tools: {e}")
+
+    # ── Tools de visão (OCR de tela — precisam do router) ────────────────────
+    if router is not None:
+        try:
+            from backend.tools.builtin.vision_tools import make_read_screen
+            if "read_screen" in whitelist:
+                registry.register(make_read_screen(router))
+        except Exception as e:
+            print(f"[KRIRK][tools] Erro ao carregar vision_tools: {e}")
+
+    # ── Tools de automação (teclado, janelas, web) ────────────────────────────
+    try:
+        from backend.tools.builtin.automation_tools import (
+            make_press_hotkey,
+            make_type_text,
+            make_list_windows,
+            make_focus_window,
+            make_fetch_url,
+        )
+        automation_factories = {
+            "press_hotkey": make_press_hotkey,
+            "type_text":    make_type_text,
+            "list_windows": make_list_windows,
+            "focus_window": make_focus_window,
+            "fetch_url":    make_fetch_url,
+        }
+        for name, factory in automation_factories.items():
+            if name in whitelist:
+                registry.register(factory())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar automation_tools: {e}")
 
     print(f"[KRIRK][tools] {len(registry.list_names())} ferramentas registradas: {registry.list_names()}")
     return registry
