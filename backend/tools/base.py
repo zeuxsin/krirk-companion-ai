@@ -22,11 +22,13 @@ class Tool:
     Uma ferramenta que a KRIRK pode usar.
     func deve ser uma coroutine async que recebe os params como kwargs
     e retorna uma string com o resultado (ou mensagem de erro).
+    timeout: sobrescreve o timeout padrão do executor (None = usa o padrão).
     """
     name: str
     description: str
     params: list[ToolParam] = field(default_factory=list)
     func: Callable[..., Awaitable[str]] = field(default=None, repr=False)  # type: ignore
+    timeout: float | None = None
 
     def format_for_prompt(self) -> str:
         """Formata a descrição da tool para ser injetada no system prompt."""

@@ -7,14 +7,28 @@ import base64
 import io
 
 
-def capture_screen() -> str:
-    """Captura o monitor primário e retorna PNG em base64 (resolução original)."""
+def capture_screen(monitor: int = 1) -> str:
+    """Captura um monitor e retorna PNG em base64 (resolução original).
+    monitor: 1 = primário, 2+ = secundários, 0 = todos combinados."""
     import mss
     from PIL import Image
 
     with mss.mss() as sct:
-        monitor = sct.monitors[1]  # monitor primário (0 = todos combinados)
-        shot = sct.grab(monitor)
+        idx = monitor if 0 <= monitor < len(sct.monitors) else 1
+        shot = sct.grab(sct.monitors[idx])
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+
+def capture_region(left: int, top: int, width: int, height: int) -> str:
+    """Captura uma região específica da tela e retorna PNG em base64."""
+    import mss
+    from PIL import Image
+
+    with mss.mss() as sct:
+        shot = sct.grab({"left": left, "top": top, "width": width, "height": height})
         img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
         buf = io.BytesIO()
         img.save(buf, format="PNG")

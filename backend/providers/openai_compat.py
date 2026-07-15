@@ -7,6 +7,28 @@ from typing import AsyncGenerator
 from .base import BaseProvider
 
 
+def _to_openai_messages(messages: list[dict]) -> list[dict]:
+    """
+    Converte mensagens com chave 'images' (lista de base64) para o formato
+    multimodal do protocolo OpenAI (content como lista de blocos text/image_url).
+    Mensagens sem imagens passam intactas.
+    """
+    out = []
+    for m in messages:
+        imgs = m.get("images")
+        if imgs:
+            content: list[dict] = [{"type": "text", "text": m.get("content", "")}]
+            for b64 in imgs:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                })
+            out.append({"role": m["role"], "content": content})
+        else:
+            out.append({"role": m["role"], "content": m.get("content", "")})
+    return out
+
+
 class OpenAICompatProvider(BaseProvider):
     """
     Funciona com qualquer API que implemente o protocolo OpenAI Chat Completions.
@@ -55,10 +77,12 @@ class OpenAICompatProvider(BaseProvider):
         temperature: float = 0.7,
         max_tokens: int = 1024,
     ) -> AsyncGenerator[str, None]:
-        client = self._client()
+        # Upload de imagens base64 é pesado — timeout maior para visão
+        has_images = any(m.get("images") for m in messages)
+        client = self._client(timeout=45.0 if has_images else 10.0)
         stream = await client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=_to_openai_messages(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
@@ -75,10 +99,11 @@ class OpenAICompatProvider(BaseProvider):
         temperature: float = 0.1,
         max_tokens: int = 512,
     ) -> str:
-        client = self._client()
+        has_images = any(m.get("images") for m in messages)
+        client = self._client(timeout=45.0 if has_images else 10.0)
         resp = await client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=_to_openai_messages(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             stream=False,

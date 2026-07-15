@@ -49,14 +49,15 @@ class ToolExecutor:
             if not p.required and p.name not in filtered and p.default is not None:
                 filtered[p.name] = p.default
 
-        # ── Executa com timeout ───────────────────────────────────────────────
+        # ── Executa com timeout (por-tool se definido, senão o padrão) ────────
+        timeout = tool.timeout or self._timeout
         try:
             result = await asyncio.wait_for(
                 tool.func(**filtered),
-                timeout=self._timeout,
+                timeout=timeout,
             )
             return str(result)
         except asyncio.TimeoutError:
-            return f"[Erro] Ferramenta '{tool_name}' excedeu o tempo limite de {self._timeout}s."
+            return f"[Erro] Ferramenta '{tool_name}' excedeu o tempo limite de {timeout}s."
         except Exception as e:
             return f"[Erro] Falha ao executar '{tool_name}': {type(e).__name__}: {e}"

@@ -41,6 +41,8 @@ TASK_MODELS: dict[str, dict[str, str]] = {
         "tools":  "qwen2.5-coder:7b",
         "code":   "qwen2.5-coder:7b",
         "embed":  "nomic-embed-text",
+        "vision": "gemma3:4b",   # gemma3 é multimodal — fallback local de visão
+        "ocr":    "gemma3:4b",
     },
 }
 
