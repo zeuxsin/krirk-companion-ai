@@ -80,9 +80,10 @@ providers:
       code:  "gemma-4-31b-it"
   cerebras:
     models:
-      chat:  "llama3.1-70b"
-      tools: "llama3.1-8b"
-      code:  "llama3.1-70b"
+      # Catálogo 2026-07 (llama3.1-* removidos do free tier)
+      chat:  "gpt-oss-120b"
+      tools: "gpt-oss-120b"
+      code:  "zai-glm-4.7"
   ollama:
     models:
       chat:   "gemma3:4b"
@@ -129,6 +130,15 @@ tools:
     - list_windows     # lista janelas abertas
     - focus_window     # traz uma janela para frente
     - fetch_url        # lê o conteúdo de uma página web (texto)
+    # ── Fase 4+: browser automatizado (Playwright) ──
+    - browser_open     # abre URL no Chromium controlado pela KRIRK
+    - browser_read     # lê o texto da página aberta
+    - browser_click    # clica em botão/link pelo texto
+    - browser_fill     # preenche campos de formulário
+    - browser_close    # fecha o browser automatizado
+    # ── Fase 5: memória de longo prazo ──
+    - search_history   # busca conversas por período ("o que falamos semana passada")
+    - remember_this    # memoriza permanentemente ("lembra disso")
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:

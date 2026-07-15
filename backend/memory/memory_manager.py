@@ -1,9 +1,36 @@
+import re
 import sqlite3
+import unicodedata
 import uuid
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+# ── Memória de longo prazo (Fase 5) ──────────────────────────────────────────
+DECAY_HALF_LIFE_DAYS = 30.0   # confiança efetiva cai pela metade a cada 30 dias
+DECAY_HIDE_BELOW     = 0.25   # fatos abaixo disto somem do prompt (mas ficam no banco)
+PURGE_BELOW          = 0.15   # fatos abaixo disto E com +90 dias são apagados
+PURGE_MIN_AGE_DAYS   = 90
+
+
+def _normalize_fact(text: str) -> str:
+    """Normaliza um fato para comparação de duplicatas: casefold, sem acentos/pontuação."""
+    t = unicodedata.normalize("NFD", text.casefold())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    t = re.sub(r"[^\w\s]", "", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _effective_confidence(confidence: float, updated_at: str, pinned: bool, now: datetime) -> float:
+    """Confiança com decay exponencial por idade. Fatos fixados nunca decaem."""
+    if pinned:
+        return 2.0  # sempre acima de qualquer fato não-fixado
+    try:
+        age_days = max(0.0, (now - datetime.fromisoformat(updated_at)).total_seconds() / 86400)
+    except (ValueError, TypeError):
+        age_days = 0.0
+    return confidence * (0.5 ** (age_days / DECAY_HALF_LIFE_DAYS))
 
 
 class MemoryManager:
@@ -93,6 +120,10 @@ class MemoryManager:
             if "session" not in cols:
                 # Mensagens antigas eram todas do chat
                 conn.execute("ALTER TABLE messages ADD COLUMN session TEXT DEFAULT 'chat'")
+            fcols = [r[1] for r in conn.execute("PRAGMA table_info(facts)").fetchall()]
+            if "pinned" not in fcols:
+                # Fatos fixados ("lembra disso") nunca sofrem decay nem purge
+                conn.execute("ALTER TABLE facts ADD COLUMN pinned INTEGER DEFAULT 0")
 
     def save_message(
         self,
@@ -142,16 +173,41 @@ class MemoryManager:
             for r in reversed(rows)
         ]
 
-    def save_fact(self, user_id: str, fact: str, category: str = "general"):
+    def save_fact(self, user_id: str, fact: str, category: str = "general",
+                  pinned: bool = False) -> bool:
+        """
+        Salva um fato com deduplicação: se um fato equivalente (normalizado) já
+        existe, reforça-o (confiança +0.25, atualiza timestamp) em vez de duplicar.
+        Retorna True se um fato NOVO foi inserido, False se reforçou existente.
+        """
+        fact = fact.strip()
+        if not fact:
+            return False
         now = datetime.now().isoformat()
+        norm = _normalize_fact(fact)
+
         with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, fact, confidence, pinned FROM facts WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+            for r in rows:
+                if _normalize_fact(r["fact"]) == norm:
+                    # Duplicata → reforça em vez de inserir
+                    conn.execute(
+                        """UPDATE facts SET confidence = MIN(1.0, confidence + 0.25),
+                           updated_at = ?, pinned = MAX(pinned, ?) WHERE id = ?""",
+                        (now, int(pinned), r["id"])
+                    )
+                    return False
+
             conn.execute(
-                """INSERT INTO facts (user_id, fact, category, created_at, updated_at)
-                   VALUES (?,?,?,?,?)""",
-                (user_id, fact, category, now, now)
+                """INSERT INTO facts (user_id, fact, category, pinned, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (user_id, fact, category, int(pinned), now, now)
             )
 
-        # Indexa no ChromaDB
+        # Indexa no ChromaDB (apenas fatos novos)
         if self._vectors:
             doc_id = f"fact-{user_id}-{uuid.uuid4().hex[:12]}"
             self._vectors.add(doc_id, fact, {
@@ -159,6 +215,11 @@ class MemoryManager:
                 "type": "fact",
                 "category": category,
             })
+        return True
+
+    def pin_fact(self, user_id: str, fact: str) -> None:
+        """Salva (ou reforça) um fato como fixado — nunca decai nem é purgado."""
+        self.save_fact(user_id, fact, category="importante", pinned=True)
 
     def delete_fact(self, user_id: str, fact: str) -> None:
         """Remove um fato específico pelo texto."""
@@ -182,12 +243,111 @@ class MemoryManager:
         self.update_profile(user_id, deepcopy(DEFAULT_PROFILE))
 
     def get_facts(self, user_id: str, limit: int = 10) -> list[str]:
+        """
+        Fatos ordenados por confiança efetiva (com decay por idade).
+        Fixados sempre primeiro; fatos decaídos abaixo do limiar são omitidos
+        (esquecimento gradual) mas permanecem no banco até o purge.
+        """
+        now = datetime.now()
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT fact FROM facts WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
-                (user_id, limit)
+                "SELECT fact, confidence, pinned, updated_at FROM facts WHERE user_id = ?",
+                (user_id,)
             ).fetchall()
-        return [r["fact"] for r in rows]
+
+        scored = []
+        for r in rows:
+            eff = _effective_confidence(
+                r["confidence"], r["updated_at"], bool(r["pinned"]), now
+            )
+            if eff >= DECAY_HIDE_BELOW:
+                scored.append((eff, r["fact"]))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [fact for _, fact in scored[:limit]]
+
+    def get_facts_full(self, user_id: str) -> list[dict]:
+        """Todos os fatos com metadados (para consolidação e painel de memória)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT fact, category, confidence, pinned, updated_at
+                   FROM facts WHERE user_id = ? ORDER BY pinned DESC, updated_at DESC""",
+                (user_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def purge_stale_facts(self, user_id: str = "default") -> int:
+        """
+        Esquecimento definitivo: apaga fatos não-fixados cuja confiança efetiva
+        caiu abaixo de PURGE_BELOW e que têm mais de PURGE_MIN_AGE_DAYS.
+        Retorna quantos fatos foram removidos. Chamado no startup do backend.
+        """
+        now = datetime.now()
+        to_delete = []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, confidence, pinned, updated_at FROM facts WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+            for r in rows:
+                if r["pinned"]:
+                    continue
+                eff = _effective_confidence(r["confidence"], r["updated_at"], False, now)
+                try:
+                    age = (now - datetime.fromisoformat(r["updated_at"])).days
+                except (ValueError, TypeError):
+                    age = 0
+                if eff < PURGE_BELOW and age > PURGE_MIN_AGE_DAYS:
+                    to_delete.append(r["id"])
+            if to_delete:
+                conn.executemany("DELETE FROM facts WHERE id = ?", [(i,) for i in to_delete])
+        if to_delete:
+            print(f"[KRIRK][memory] Esquecidos {len(to_delete)} fatos obsoletos (decay)")
+        return len(to_delete)
+
+    def replace_facts(self, user_id: str, facts: list[str]) -> None:
+        """
+        Substitui todos os fatos NÃO-fixados pela lista consolidada.
+        Usado pela consolidação via LLM. Fatos fixados ficam intocados.
+        """
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute("DELETE FROM facts WHERE user_id = ? AND pinned = 0", (user_id,))
+            conn.executemany(
+                """INSERT INTO facts (user_id, fact, category, pinned, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                [(user_id, f.strip(), "general", 0, now, now) for f in facts if f.strip()]
+            )
+
+    def search_messages_by_period(
+        self,
+        user_id: str,
+        days_from: int,
+        days_to: int = 0,
+        keyword: str | None = None,
+        session: str = "chat",
+        limit: int = 40,
+    ) -> list[dict]:
+        """
+        Busca mensagens num período: de days_from dias atrás até days_to dias atrás
+        (days_to=0 = agora). Ex: 'semana passada' → days_from=14, days_to=7.
+        keyword filtra por substring (case-insensitive via LIKE).
+        """
+        now = datetime.now()
+        start = (now - timedelta(days=max(days_from, days_to))).isoformat()
+        end = (now - timedelta(days=min(days_from, days_to))).isoformat()
+
+        query = """SELECT role, content, created_at FROM messages
+                   WHERE user_id = ? AND session = ? AND created_at BETWEEN ? AND ?"""
+        params: list = [user_id, session, start, end]
+        if keyword:
+            query += " AND content LIKE ?"
+            params.append(f"%{keyword}%")
+        query += " ORDER BY id ASC LIMIT ?"
+        params.append(limit)
+
+        with self._conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
 
     def search_semantic(self, user_id: str, query: str, n: int = 5) -> list[dict]:
         """Busca semântica nas memórias do usuário. Retorna [] se ChromaDB indisponível."""

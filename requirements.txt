@@ -39,7 +39,8 @@ sentence-transformers>=3.0.0
 
 # Automação desktop (Fase 4)
 pyautogui>=0.9.54       # teclado/atalhos (press_hotkey, type_text)
-# playwright>=1.45.0    # opcional — automação de browser completa (futuro)
+playwright>=1.45.0      # browser automatizado (browser_open/click/fill/read)
+# Após instalar: playwright install chromium
 
 # Web Search (Fase 4 — tools)
 ddgs>=0.1.0

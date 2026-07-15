@@ -80,6 +80,7 @@ async def _stream_strip_reasoning(
     if buf and not suppressed:
         yield buf
 
+from backend.agents.planner import parse_decision, MAX_PLAN_STEPS
 from backend.core.personality import PersonalitySystem
 from backend.core.state import AIState, AISystemState
 from backend.memory.memory_manager import MemoryManager
@@ -196,15 +197,17 @@ class Orchestrator:
         message: str,
         history: list | None = None,
         executed: list[tuple[str, str]] | None = None,
-    ) -> dict | None:
+    ) -> dict:
         """
-        Usa o modelo de roteamento para decidir QUAL ferramenta usar, se alguma.
+        Usa o modelo de roteamento para decidir o que fazer com a mensagem.
         executed: ferramentas já executadas NESTA requisição [(nome, resultado)] —
         permite o loop de agente encadear passos até completar o pedido.
-        Retorna dict {"tool": str, "params": dict} ou None se nenhuma tool for necessária.
+        Retorna (via parse_decision):
+          {"type": "none"} | {"type": "tool", "tool", "params"} | {"type": "plan", "steps"}
+        Planos só são aceitos na primeira decisão (executed is None).
         """
         if not (self.tool_registry and self.tool_executor):
-            return None
+            return {"type": "none"}
 
         tool_desc = self.tool_registry.get_descriptions()
 
@@ -231,6 +234,18 @@ class Orchestrator:
                 "Otherwise, choose the NEXT tool needed to continue.\n\n"
             )
 
+        allow_plan = executed is None  # plano só na primeira decisão, não dentro de passos
+
+        plan_rule = (
+            f"- If the request needs MULTIPLE DIFFERENT tools in sequence "
+            f"(e.g. open an app AND THEN type text into it), respond with ONLY a "
+            f"COMPLETE plan including all params (max {MAX_PLAN_STEPS} steps):\n"
+            f'  {{"plan": [{{"tool": "open_app", "params": {{"app_name": "notepad"}}}}, '
+            f'{{"tool": "type_text", "params": {{"text": "the exact text to type"}}}}]}}\n'
+            f"  Plans are ONLY for ACTION sequences on the computer. Questions, memory "
+            f"lookups and info requests use a single tool or none — NEVER a plan.\n"
+        ) if allow_plan else ""
+
         planning_prompt = (
             "You are a tool router for a desktop AI assistant. "
             "Analyze the user's message and decide which tool to use, if any.\n\n"
@@ -240,19 +255,29 @@ class Orchestrator:
             f"{executed_context}"
             f"User message: {message}\n\n"
             "Rules:\n"
-            "- If a tool is needed, respond with ONLY valid JSON (no markdown, no explanation):\n"
+            "- If ONE tool is needed, respond with ONLY valid JSON (no markdown, no explanation):\n"
             '  {"tool": "exact_tool_name", "params": {"param_name": "value"}}\n'
+            f"{plan_rule}"
             "- If no tool is needed, respond with exactly: none\n"
+            "- IMPORTANT: decide based on the CURRENT user message ONLY. The 'Recent conversation' "
+            "section exists ONLY to resolve references like 'de novo', 'novamente', 'o mesmo'. "
+            "NEVER pick a tool because of URLs, sites, apps or actions mentioned in the history — "
+            "if the current message does not itself ask for an action or fresh information, respond: none\n"
             "- NEVER use a tool for: greetings, thanks, short replies, confirmations, "
             "reactions ('ok', 'isso aí', 'certo', 'sim', 'não', 'ótimo', 'entendi', 'legal', "
-            "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, or casual chat.\n"
+            "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, questions about the assistant "
+            "itself, or casual chat. When in doubt, respond: none\n"
             "- search_memory: ONLY use when the user is EXPLICITLY asking to recall past "
             "conversations ('você lembra?', 'o que eu te falei?', 'qual era mesmo?'). "
             "Do NOT use for confirmations or reactions to what was just said.\n"
+            "- search_history: when the user asks what was discussed in a past PERIOD "
+            "('o que falamos ontem?', 'sobre o que conversamos semana passada?'). "
+            "days_back = how many days back to search.\n"
+            "- remember_this: ONLY when the user EXPLICITLY asks to remember/save something "
+            "('lembra disso', 'anota que...', 'não esquece que...'). Pass the fact as param.\n"
             "- Use the EXACT tool name as listed above. Do not translate to Portuguese.\n"
             "- For run_powershell, write a complete PowerShell command.\n"
             "- For list_directory and read_file, use the full absolute path.\n"
-            "- Use conversation history to resolve references like 'again', 'de novo', 'novamente'.\n"
             "- open_url: use for ANY request to open a website, URL, or online service "
             "(YouTube, Google, GitHub, Reddit, Twitter, Netflix, Twitch, etc.). "
             "NEVER use open_file for websites. Pass only the domain or URL, not a file path.\n"
@@ -260,36 +285,27 @@ class Orchestrator:
             "- set_timer: use when the user asks for a timer, countdown, or reminder with a time duration.\n"
             "- fetch_url: use to READ the text content of a SPECIFIC page/site. "
             "web_search: to SEARCH the internet when no specific URL is known.\n"
+            "- browser_open/browser_click/browser_fill/browser_read: interactive browser that YOU "
+            "control to navigate, click buttons, fill forms and read the result. Use ONLY when the "
+            "task requires interacting with a page, not just reading it.\n"
             "- read_screen: use when the user asks to read/check/transcribe what is on their screen.\n"
-            "- Multi-step requests may need a SEQUENCE of tools (e.g. open_app then type_text). "
-            "Choose only the FIRST/NEXT step now; you will be asked again for the following step.\n"
         )
 
         raw = await self.router.complete(
             "tools",
             [{"role": "user", "content": planning_prompt}],
             temperature=0.1,
-            max_tokens=256,
+            max_tokens=300,
         )
 
         raw = raw.strip()
         print(f"[KRIRK][tools] Decisão do roteador: {raw[:150]}")
 
-        # "none" ou resposta vazia → sem tool
-        if not raw or raw.lower().startswith("none"):
-            return None
-
-        # Extrai o primeiro bloco JSON da resposta (ignora texto extra)
-        try:
-            match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', raw, re.DOTALL)
-            if match:
-                data = json.loads(match.group())
-                if "tool" in data and "params" in data:
-                    return data
-        except Exception as e:
-            print(f"[KRIRK][tools] Falha ao parsear decisão: {e} — raw: {raw[:100]}")
-
-        return None
+        decision = parse_decision(raw)
+        if not allow_plan and decision["type"] == "plan":
+            # Dentro de um passo não aceitamos sub-planos — vira none
+            return {"type": "none"}
+        return decision
 
     # ── Pipeline principal ────────────────────────────────────────────────────
 
@@ -334,44 +350,86 @@ class Orchestrator:
             min_score = self._vector_cfg.get("min_score", 0.45)
             semantic_memories = [r["text"] for r in raw if r["score"] >= min_score]
 
-        # ── FASE 1: Loop de agente — encadeia até max_rounds ferramentas ──────
+        # ── FASE 1: Planner + loop de agente ──────────────────────────────────
         tool_result_context = ""
         executed_tools: list[tuple[str, str]] = []
         if self._tool_cfg.get("enabled", False) and self.tool_executor:
             max_rounds = self._tool_cfg.get("max_rounds", 4)
-            prev_decision_json = None
 
-            for _round in range(max_rounds):
-                tool_decision = await self._decide_tool(
-                    message, history, executed=executed_tools or None
-                )
-                if not tool_decision:
-                    break
+            decision = await self._decide_tool(message, history)
 
-                # Guarda contra loop: mesma tool + mesmos params da rodada anterior
-                decision_json = json.dumps(tool_decision, sort_keys=True)
-                if decision_json == prev_decision_json:
-                    print("[KRIRK][agent] Decisão repetida — encerrando loop.")
-                    break
-                prev_decision_json = decision_json
+            plan_attempted = False
+            if decision["type"] == "plan":
+                # ── Modo planejado ─────────────────────────────────────────────
+                # Passos dict {"tool","params"} executam DIRETO (sem re-roteamento);
+                # passos string (legado) são re-roteados com o pedido original junto.
+                plan_attempted = True
+                steps = decision["steps"][:max_rounds]
+                step_labels = [
+                    s["tool"] if isinstance(s, dict) else s for s in steps
+                ]
+                print(f"[KRIRK][agent] Plano com {len(steps)} passos: {step_labels}")
+                yield {"type": "tool_call", "tool": "planner",
+                       "raw": json.dumps({"plan": step_labels}, ensure_ascii=False)}
+                yield {"type": "tool_result", "tool": "planner",
+                       "result": "Plano:\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(step_labels))}
 
-                tool_name = tool_decision.get("tool", "ferramenta")
+                for i, step in enumerate(steps):
+                    if isinstance(step, dict):
+                        payload = step
+                    else:
+                        step_decision = await self._decide_tool(
+                            f"{step} (parte do pedido original: \"{message}\")",
+                            history, executed=executed_tools or []
+                        )
+                        if step_decision["type"] != "tool":
+                            print(f"[KRIRK][agent] passo {i+1} não mapeou para tool: {step}")
+                            continue
+                        payload = {"tool": step_decision["tool"], "params": step_decision["params"]}
 
-                self.state.set(AISystemState.EXECUTING)
-                yield {"type": "status", "state": "executing"}
-                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(tool_decision)}
+                    tool_name = payload["tool"]
 
-                result = await self.tool_executor.execute_from_json(
-                    json.dumps(tool_decision)
-                )
-                print(f"[KRIRK][agent] round {_round + 1}/{max_rounds}: {tool_name} → {result[:150]}")
-                yield {"type": "tool_result", "tool": tool_name, "result": result}
+                    self.state.set(AISystemState.EXECUTING)
+                    yield {"type": "status", "state": "executing"}
+                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
 
-                executed_tools.append((tool_name, result))
+                    result = await self.tool_executor.execute_from_json(json.dumps(payload))
+                    print(f"[KRIRK][agent] passo {i+1}/{len(steps)}: {tool_name} → {result[:150]}")
+                    yield {"type": "tool_result", "tool": tool_name, "result": result}
+                    executed_tools.append((tool_name, result))
 
-                # Erro na tool → não insiste em mais rodadas, deixa o modelo explicar
-                if result.startswith("[Erro]"):
-                    break
+                    if result.startswith("[Erro]"):
+                        break  # não continua o plano em cima de um passo falho
+
+            elif decision["type"] == "tool":
+                # ── Modo iterativo: executa e pergunta se precisa de mais ──────
+                prev_decision_json = None
+                for _round in range(max_rounds):
+                    if decision["type"] != "tool":
+                        break
+
+                    payload = {"tool": decision["tool"], "params": decision["params"]}
+                    decision_json = json.dumps(payload, sort_keys=True)
+                    if decision_json == prev_decision_json:
+                        print("[KRIRK][agent] Decisão repetida — encerrando loop.")
+                        break
+                    prev_decision_json = decision_json
+
+                    tool_name = payload["tool"]
+
+                    self.state.set(AISystemState.EXECUTING)
+                    yield {"type": "status", "state": "executing"}
+                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
+
+                    result = await self.tool_executor.execute_from_json(json.dumps(payload))
+                    print(f"[KRIRK][agent] round {_round + 1}/{max_rounds}: {tool_name} → {result[:150]}")
+                    yield {"type": "tool_result", "tool": tool_name, "result": result}
+                    executed_tools.append((tool_name, result))
+
+                    if result.startswith("[Erro]"):
+                        break
+
+                    decision = await self._decide_tool(message, history, executed=executed_tools)
 
             if executed_tools:
                 if len(executed_tools) == 1:
@@ -387,6 +445,12 @@ class Orchestrator:
                         f"Executei {len(executed_tools)} ferramentas em sequência. Resultados:\n\n"
                         f"{parts_txt}"
                     )
+            elif plan_attempted:
+                # Plano criado mas nenhum passo executou — força honestidade
+                tool_result_context = (
+                    "ATENÇÃO: tentei executar o pedido mas NENHUMA ferramenta foi "
+                    "executada com sucesso. Nada foi feito no computador."
+                )
 
         # ── FASE 2: Resposta final via gemma3 ─────────────────────────────────
         # Perfil estruturado do usuário (nome, profissão, etc.)
@@ -451,8 +515,10 @@ class Orchestrator:
                 followup_instruction = (
                     f"O usuário pediu: \"{message}\"\n"
                     "Você executou os passos acima em sequência. Confirme em português, "
-                    "de forma natural e breve, o que foi feito e o resultado final. "
-                    "Se algum passo falhou, explique qual e por quê."
+                    "de forma natural e breve, APENAS o que os resultados acima comprovam. "
+                    "NUNCA afirme ter feito algo que não aparece nos resultados. "
+                    "Se parte do pedido não foi executada ou algum passo falhou, "
+                    "diga isso claramente e explique o que faltou."
                 )
             else:
                 followup_instruction = (
@@ -460,7 +526,9 @@ class Orchestrator:
                     "Responda em português, de forma natural e bem curta. "
                     "Use APENAS a parte do resultado que responde diretamente à pergunta. "
                     "Se perguntou só a hora, diga só a hora. Se perguntou só o clipboard, diga só o conteúdo. "
-                    "Não mencione dados extras que não foram pedidos."
+                    "Não mencione dados extras que não foram pedidos. "
+                    "NUNCA afirme ter feito algo que não aparece no resultado acima — "
+                    "se o pedido tinha mais partes e só esta foi executada, diga o que faltou."
                 )
 
             llm_messages.append({
@@ -534,20 +602,19 @@ class Orchestrator:
             "Explain errors clearly and suggest fixes."
         )
 
-        # ── Tool routing (mesmo _decide_tool do chat normal) ──────────────────
+        # ── Tool routing (mesmo _decide_tool do chat normal; sem planos) ──────
         tool_result_context = ""
         if self._tool_cfg.get("enabled", False) and self.tool_executor:
-            tool_decision = await self._decide_tool(message, history)
+            decision = await self._decide_tool(message, history)
 
-            if tool_decision:
-                tool_name = tool_decision.get("tool", "ferramenta")
+            if decision["type"] == "tool":
+                payload = {"tool": decision["tool"], "params": decision["params"]}
+                tool_name = payload["tool"]
                 self.state.set(AISystemState.EXECUTING)
                 yield {"type": "status", "state": "executing"}
-                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(tool_decision)}
+                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
 
-                result = await self.tool_executor.execute_from_json(
-                    json.dumps(tool_decision)
-                )
+                result = await self.tool_executor.execute_from_json(json.dumps(payload))
                 print(f"[KRIRK][code] {tool_name} → {result[:150]}")
                 yield {"type": "tool_result", "tool": tool_name, "result": result}
                 tool_result_context = result
@@ -794,6 +861,55 @@ class Orchestrator:
             print(f"[KRIRK][context] Resumo gerado: {len(history)} msgs → {len(summary)} chars")
         except Exception as e:
             print(f"[KRIRK][context] Erro ao gerar resumo: {e}")
+
+    async def consolidate_facts(self, user_id: str = "default") -> dict:
+        """
+        Consolida fatos duplicados/redundantes via LLM (Fase 5).
+        Fatos fixados (pinned) ficam intocados. Conservador: só substitui a
+        lista se o LLM retornar JSON válido com quantidade plausível.
+        """
+        all_facts = self.memory.get_facts_full(user_id)
+        non_pinned = [f["fact"] for f in all_facts if not f["pinned"]]
+
+        if len(non_pinned) < 4:
+            return {"before": len(non_pinned), "after": len(non_pinned), "merged": 0}
+
+        numbered = "\n".join(f"{i+1}. {f}" for i, f in enumerate(non_pinned))
+        prompt = (
+            "A lista abaixo contém fatos sobre um usuário, possivelmente com "
+            "duplicatas ou redundâncias. Consolide-a:\n"
+            "- Una fatos que dizem a mesma coisa em um só (mantendo o mais completo)\n"
+            "- NÃO invente informação nova, NÃO descarte informação única\n"
+            "- Mantenha cada fato curto e objetivo, em português\n\n"
+            f"Fatos:\n{numbered}\n\n"
+            'Responda APENAS com JSON: {"facts": ["fato 1", "fato 2", ...]}'
+        )
+
+        raw = await self.router.complete(
+            "tools",
+            [{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=1000,
+        )
+
+        try:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            data = json.loads(match.group()) if match else {}
+            new_facts = [str(f).strip() for f in data.get("facts", []) if str(f).strip()]
+        except Exception as e:
+            print(f"[KRIRK][memory] Consolidação falhou no parse: {e}")
+            return {"before": len(non_pinned), "after": len(non_pinned), "merged": 0,
+                    "error": "resposta inválida do modelo"}
+
+        # Sanidade: precisa reduzir (ou manter) e não pode esvaziar a lista
+        if not new_facts or len(new_facts) > len(non_pinned):
+            return {"before": len(non_pinned), "after": len(non_pinned), "merged": 0,
+                    "error": "consolidação rejeitada (quantidade implausível)"}
+
+        self.memory.replace_facts(user_id, new_facts)
+        merged = len(non_pinned) - len(new_facts)
+        print(f"[KRIRK][memory] Consolidação: {len(non_pinned)} → {len(new_facts)} fatos")
+        return {"before": len(non_pinned), "after": len(new_facts), "merged": merged}
 
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """

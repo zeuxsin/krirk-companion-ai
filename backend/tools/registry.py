@@ -152,12 +152,20 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar code_tools: {e}")
 
-    # ── Tool de busca na memória semântica ───────────────────────────────────
+    # ── Tools de memória (busca semântica, busca temporal, memorizar) ────────
     if memory is not None:
         try:
-            from backend.tools.builtin.memory_tools import make_search_memory
+            from backend.tools.builtin.memory_tools import (
+                make_search_memory,
+                make_search_history,
+                make_remember_fact,
+            )
             if "search_memory" in whitelist:
                 registry.register(make_search_memory(memory))
+            if "search_history" in whitelist:
+                registry.register(make_search_history(memory))
+            if "remember_this" in whitelist:
+                registry.register(make_remember_fact(memory))
         except Exception as e:
             print(f"[KRIRK][tools] Erro ao carregar memory_tools: {e}")
 
@@ -191,6 +199,28 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
                 registry.register(factory())
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar automation_tools: {e}")
+
+    # ── Tools de browser automatizado (Playwright) ────────────────────────────
+    try:
+        from backend.tools.builtin.browser_tools import (
+            make_browser_open,
+            make_browser_read,
+            make_browser_click,
+            make_browser_fill,
+            make_browser_close,
+        )
+        browser_factories = {
+            "browser_open":  make_browser_open,
+            "browser_read":  make_browser_read,
+            "browser_click": make_browser_click,
+            "browser_fill":  make_browser_fill,
+            "browser_close": make_browser_close,
+        }
+        for name, factory in browser_factories.items():
+            if name in whitelist:
+                registry.register(factory())
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao carregar browser_tools: {e}")
 
     print(f"[KRIRK][tools] {len(registry.list_names())} ferramentas registradas: {registry.list_names()}")
     return registry

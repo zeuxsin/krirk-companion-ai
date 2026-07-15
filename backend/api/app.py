@@ -52,6 +52,11 @@ def create_app() -> FastAPI:
             if "tts_voice"         in saved: orchestrator.tts.set_voice(str(saved["tts_voice"]))
             if "stt_enabled"       in saved: orchestrator.stt.set_enabled(bool(saved["stt_enabled"]))
             if "proactive_enabled" in saved: proactive_monitor.set_enabled(bool(saved["proactive_enabled"]))
+        # Esquecimento gradual (Fase 5): purga fatos obsoletos no boot
+        try:
+            orchestrator.memory.purge_stale_facts("default")
+        except Exception as e:
+            print(f"[KRIRK][memory] Purge falhou: {e}")
         await proactive_monitor.start()
         yield
 
@@ -143,6 +148,11 @@ def create_app() -> FastAPI:
     async def clear_memory(user_id: str = "default"):
         orchestrator.memory.clear_all(user_id)
         return {"ok": True}
+
+    @app.post("/api/memory/consolidate")
+    async def consolidate_memory(user_id: str = "default"):
+        """Consolida fatos duplicados/redundantes via LLM (Fase 5)."""
+        return await orchestrator.consolidate_facts(user_id)
 
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):

@@ -1,4 +1,4 @@
-"""
+﻿"""
 tests/test_unit.py
 Testes unitários OFFLINE — sem rede, sem Ollama, sem APIs cloud.
 Roda com:  .venv\\Scripts\\python.exe tests\\test_unit.py
@@ -163,7 +163,7 @@ check("safe_path REJEITA C:\\Windows", _safe_path("C:\\Windows\\System32") is No
 check("safe_path REJEITA traversal para fora do home",
       _safe_path(str(HOME / ".." / ".." / "Windows")) is None)
 
-# Roundtrip write → read → list em pasta temporária (dentro do home no Windows)
+# Roundtrip write -> read -> list em pasta temporária (dentro do home no Windows)
 tmp2 = Path(tempfile.mkdtemp(prefix="krirk_ft_"))
 try:
     if _safe_path(str(tmp2)) is None:
@@ -393,6 +393,186 @@ check("mensagem 'Gone' e retriable", _is_retriable(Exception("The model is Gone"
 check("timeout e retriable", _is_retriable(Exception("Request timed out.")))
 check("401 NAO e retriable (chave invalida)", not _is_retriable(_FakeStatusError(401)))
 check("erro generico NAO e retriable", not _is_retriable(ValueError("bug qualquer")))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Planner — parse de decisões do roteador
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("10. Planner parse_decision")
+
+from backend.agents.planner import parse_decision, MAX_PLAN_STEPS
+
+check("'none' -> none", parse_decision("none") == {"type": "none"})
+check("vazio -> none", parse_decision("") == {"type": "none"})
+check("'None.' com texto -> none", parse_decision("None. No tool needed") == {"type": "none"})
+
+d = parse_decision('{"tool": "open_app", "params": {"app_name": "notepad"}}')
+check("tool JSON simples", d == {"type": "tool", "tool": "open_app", "params": {"app_name": "notepad"}})
+
+d = parse_decision('```json\n{"tool": "roll_dice", "params": {"sides": 20}}\n```')
+check("tool com cerca markdown", d["type"] == "tool" and d["tool"] == "roll_dice")
+
+d = parse_decision('{"tool": "get_time"}')
+check("tool sem params -> params vazio", d == {"type": "tool", "tool": "get_time", "params": {}})
+
+d = parse_decision('{"plan": ["abrir o bloco de notas", "digitar o texto"]}')
+check("plan com 2 passos", d == {"type": "plan", "steps": ["abrir o bloco de notas", "digitar o texto"]})
+
+d = parse_decision('{"plan": ["a", "b", "c", "d", "e", "f"]}')
+check(f"plan trunca em {MAX_PLAN_STEPS} passos", len(d["steps"]) == MAX_PLAN_STEPS)
+
+d = parse_decision('{"plan": [{"tool": "open_app", "params": {"app_name": "notepad"}}, {"tool": "type_text", "params": {"text": "oi"}}]}')
+check("plan estruturado (tool calls completas)",
+      d["type"] == "plan" and d["steps"][0] == {"tool": "open_app", "params": {"app_name": "notepad"}}
+      and d["steps"][1]["params"]["text"] == "oi")
+
+d = parse_decision('{"plan": [{"tool": "get_time"}, "passo em texto"]}')
+check("plan misto dict+string", d["steps"][0] == {"tool": "get_time", "params": {}} and d["steps"][1] == "passo em texto")
+
+check("plan vazio -> none", parse_decision('{"plan": []}') == {"type": "none"})
+check("JSON invalido -> none", parse_decision('{"tool": open_app}') == {"type": "none"})
+check("texto sem JSON -> none", parse_decision("vou usar a ferramenta open_app") == {"type": "none"})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Circuit breaker do ProviderRouter
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("11. Circuit breaker")
+
+import time as _time
+from backend.providers.router import ProviderRouter
+from backend.providers.base import BaseProvider
+
+
+class _FakeProvider(BaseProvider):
+    name = "fake"
+    async def stream_chat(self, messages, model, temperature=0.7, max_tokens=1024):
+        yield "x"
+    async def chat(self, messages, model, temperature=0.1, max_tokens=512):
+        return "x"
+
+
+fake_a, fake_b = _FakeProvider(), _FakeProvider()
+router = ProviderRouter(
+    providers={"a": fake_a, "b": fake_b},
+    task_models={"a": {"chat": "m1"}, "b": {"chat": "m2"}},
+    task_fallback={"chat": ["a", "b"]},
+)
+
+check("sem falhas: 2 providers ativos", len(router._ordered_providers("chat")) == 2)
+
+router._record_failure("a")
+check("1 falha ainda nao abre o breaker", not router._is_skipped("a"))
+
+router._record_failure("a")
+check("2 falhas abrem o breaker", router._is_skipped("a"))
+check("provider pausado sai da ordem", [n for n, _ in router._ordered_providers("chat")] == ["b"])
+
+router._record_success("a")
+check("sucesso reseta o breaker", not router._is_skipped("a"))
+
+# Todos pausados -> usa a lista completa mesmo assim (nunca fica sem provider)
+router._record_failure("a"); router._record_failure("a")
+router._record_failure("b"); router._record_failure("b")
+check("todos pausados -> fallback para lista completa", len(router._ordered_providers("chat")) == 2)
+
+# Cooldown expirado -> volta a usar
+router._skip_until["a"] = _time.monotonic() - 1
+check("cooldown expirado reabilita o provider", not router._is_skipped("a"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. Fase 5 — memória de longo prazo
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("12. Memoria de longo prazo (Fase 5)")
+
+from backend.memory.memory_manager import _normalize_fact, _effective_confidence
+from datetime import datetime, timedelta
+
+check("normaliza acentos/caixa", _normalize_fact("Érik GOSTA de Café!") == _normalize_fact("erik gosta de cafe"))
+check("normaliza espacos", _normalize_fact("a  b   c") == "a b c")
+
+now = datetime.now()
+fresh = now.isoformat()
+old_45d = (now - timedelta(days=45)).isoformat()
+
+check("fato novo tem confianca cheia", abs(_effective_confidence(1.0, fresh, False, now) - 1.0) < 0.01)
+eff_45 = _effective_confidence(1.0, old_45d, False, now)
+check("fato de 45 dias decaiu (~0.35)", 0.30 < eff_45 < 0.42, f"eff={eff_45:.2f}")
+check("fato fixado nunca decai", _effective_confidence(1.0, old_45d, True, now) == 2.0)
+
+tmp5 = Path(tempfile.mkdtemp(prefix="krirk_lt_"))
+try:
+    mm5 = MemoryManager(db_path=str(tmp5 / "t.db"), chroma_path=str(tmp5 / "c"))
+    mm5._vectors = None
+    U = "lt-user"
+
+    # Dedupe na inserção
+    check("fato novo insere", mm5.save_fact(U, "gosta de Minecraft") is True)
+    check("duplicata exata reforca", mm5.save_fact(U, "gosta de Minecraft") is False)
+    check("duplicata normalizada reforca", mm5.save_fact(U, "Gosta de MINECRAFT!") is False)
+    check("apenas 1 fato no banco", len(mm5.get_facts_full(U)) == 1)
+
+    # Pin
+    mm5.pin_fact(U, "aniversario em 10 de março")
+    full = mm5.get_facts_full(U)
+    pinned = [f for f in full if f["pinned"]]
+    check("pin_fact grava fixado", len(pinned) == 1 and "aniversario" in pinned[0]["fact"])
+
+    # Decay: fato antigo some do get_facts
+    import sqlite3 as _sql
+    old_iso = (datetime.now() - timedelta(days=100)).isoformat()
+    conn = _sql.connect(tmp5 / "t.db")
+    conn.execute(
+        "INSERT INTO facts (user_id, fact, category, pinned, confidence, created_at, updated_at) VALUES (?,?,?,0,1.0,?,?)",
+        (U, "fato muito antigo e irrelevante", "general", old_iso, old_iso),
+    )
+    conn.commit(); conn.close()
+
+    visible = mm5.get_facts(U, limit=50)
+    check("fato de 100 dias omitido do prompt", "fato muito antigo e irrelevante" not in visible)
+    check("fato recente visivel", any("Minecraft" in f for f in visible))
+    check("fato fixado visivel e primeiro", visible and "aniversario" in visible[0])
+
+    # Purge: remove o antigo, preserva fixado e recente
+    removed = mm5.purge_stale_facts(U)
+    check("purge remove 1 fato obsoleto", removed == 1)
+    remaining = [f["fact"] for f in mm5.get_facts_full(U)]
+    check("purge preserva recente e fixado", len(remaining) == 2 and "fato muito antigo e irrelevante" not in remaining)
+
+    # replace_facts preserva fixados
+    mm5.save_fact(U, "fato a"); mm5.save_fact(U, "fato b")
+    mm5.replace_facts(U, ["fato consolidado ab"])
+    after = mm5.get_facts_full(U)
+    check("replace_facts troca nao-fixados", any("consolidado" in f["fact"] for f in after))
+    check("replace_facts preserva fixados", any(f["pinned"] for f in after))
+    check("replace_facts remove antigos", not any(f["fact"] == "fato a" for f in after))
+
+    # Busca por período
+    conn = _sql.connect(tmp5 / "t.db")
+    for days, content in [(10, "conversa sobre viagem"), (3, "conversa sobre trabalho"), (0, "conversa de hoje")]:
+        ts = (datetime.now() - timedelta(days=days, hours=1)).isoformat()
+        conn.execute(
+            "INSERT INTO messages (user_id, role, content, emotion, session, created_at) VALUES (?,?,?,?,?,?)",
+            (U, "user", content, "neutro", "chat", ts),
+        )
+    conn.commit(); conn.close()
+
+    last_week = mm5.search_messages_by_period(U, days_from=7, days_to=0)
+    contents = [m["content"] for m in last_week]
+    check("periodo 7 dias pega recentes", "conversa sobre trabalho" in contents and "conversa de hoje" in contents)
+    check("periodo 7 dias exclui antigas", "conversa sobre viagem" not in contents)
+
+    older = mm5.search_messages_by_period(U, days_from=14, days_to=7)
+    check("janela 14-7 dias pega so a antiga", [m["content"] for m in older] == ["conversa sobre viagem"])
+
+    kw = mm5.search_messages_by_period(U, days_from=14, days_to=0, keyword="trabalho")
+    check("filtro por keyword", len(kw) == 1 and "trabalho" in kw[0]["content"])
+finally:
+    shutil.rmtree(tmp5, ignore_errors=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ Cada tarefa tem modelos configurados por provider.
 """
 import asyncio
 import os
+import time
 from typing import AsyncGenerator
 
 from .base import BaseProvider
@@ -34,9 +35,10 @@ TASK_MODELS: dict[str, dict[str, str]] = {
         "code":   "gemma-4-31b-it",
     },
     "cerebras": {
-        "chat":   "llama3.1-70b",
-        "tools":  "llama3.1-8b",
-        "code":   "llama3.1-70b",
+        # Catálogo 2026-07: gpt-oss-120b, gemma-4-31b, zai-glm-4.7 (llama3.1 removidos)
+        "chat":   "gpt-oss-120b",
+        "tools":  "gpt-oss-120b",
+        "code":   "zai-glm-4.7",
     },
     "ollama": {
         "chat":   "gemma3:4b",
@@ -49,9 +51,11 @@ TASK_MODELS: dict[str, dict[str, str]] = {
 }
 
 # Ordem de fallback por tarefa
+# tools passa por google/cerebras antes do qwen local — roteamento de qualidade
+# importa mais que latência (o qwen 7b gera planos ruins)
 TASK_FALLBACK: dict[str, list[str]] = {
     "chat":   ["nvidia", "google", "cerebras", "ollama"],
-    "tools":  ["nvidia", "ollama"],
+    "tools":  ["nvidia", "google", "cerebras", "ollama"],
     "code":   ["nvidia", "cerebras", "ollama"],
     "embed":  ["nvidia", "ollama"],
     "ocr":    ["nvidia", "ollama"],
@@ -97,6 +101,11 @@ def _is_retriable(exc: Exception) -> bool:
 
 
 class ProviderRouter:
+    # Circuit breaker: após N falhas consecutivas, o provider é pulado por um tempo.
+    # Evita desperdiçar ~10s de timeout por chamada quando um provider está fora.
+    BREAKER_THRESHOLD = 2
+    BREAKER_COOLDOWN = 180.0  # segundos
+
     def __init__(
         self,
         providers: dict[str, BaseProvider],
@@ -107,6 +116,31 @@ class ProviderRouter:
         self._providers = providers
         self._task_models = task_models or TASK_MODELS
         self._task_fallback = task_fallback or TASK_FALLBACK
+        self._failures: dict[str, int] = {}
+        self._skip_until: dict[str, float] = {}
+
+    # ── Circuit breaker ───────────────────────────────────────────────────────
+
+    def _record_failure(self, name: str) -> None:
+        self._failures[name] = self._failures.get(name, 0) + 1
+        if self._failures[name] >= self.BREAKER_THRESHOLD:
+            self._skip_until[name] = time.monotonic() + self.BREAKER_COOLDOWN
+            print(f"[KRIRK][router] Circuit breaker: {name} pausado por {self.BREAKER_COOLDOWN:.0f}s")
+
+    def _record_success(self, name: str) -> None:
+        self._failures.pop(name, None)
+        self._skip_until.pop(name, None)
+
+    def _is_skipped(self, name: str) -> bool:
+        until = self._skip_until.get(name)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            # Cooldown expirou — dá nova chance
+            self._skip_until.pop(name, None)
+            self._failures.pop(name, None)
+            return False
+        return True
 
     def _get_model(self, provider_name: str, task: str) -> str | None:
         return self._task_models.get(provider_name, {}).get(task)
@@ -119,7 +153,9 @@ class ProviderRouter:
             p = self._providers.get(name)
             if p and p.is_available() and self._get_model(name, task):
                 result.append((name, p))
-        return result
+        # Circuit breaker filtra os pausados — mas nunca deixa a lista vazia
+        active = [(n, p) for n, p in result if not self._is_skipped(n)]
+        return active if active else result
 
     async def stream(
         self,
@@ -144,10 +180,12 @@ class ProviderRouter:
                     temperature=temperature, max_tokens=max_tokens,
                 ):
                     yield token
+                self._record_success(name)
                 return  # sucesso
             except Exception as e:
                 last_err = e
                 if _is_retriable(e):
+                    self._record_failure(name)
                     print(f"[KRIRK][router] {name} falhou ({e}), tentando próximo...")
                     continue
                 raise  # erro não-retriable -> propaga
@@ -171,13 +209,16 @@ class ProviderRouter:
             model = self._get_model(name, task)
             try:
                 print(f"[KRIRK][router] complete/{task} -> {name}/{model}")
-                return await provider.chat(
+                result = await provider.chat(
                     messages, model=model,
                     temperature=temperature, max_tokens=max_tokens,
                 )
+                self._record_success(name)
+                return result
             except Exception as e:
                 last_err = e
                 if _is_retriable(e):
+                    self._record_failure(name)
                     print(f"[KRIRK][router] {name} falhou ({e}), tentando próximo...")
                     continue
                 raise
