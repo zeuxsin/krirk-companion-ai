@@ -35,16 +35,26 @@ backend/api/websocket.py  → dispatch por payload.type:
    chat | code_chat | audio | screenshot | image_chat | settings | status
    ▼
 backend/core/orchestrator.py  — pipeline de 2 fases:
-   FASE 1: loop de agente — _decide_tool() é chamado até max_rounds (config: 4) vezes;
-     cada rodada recebe os resultados anteriores e escolhe a PRÓXIMA tool ou "none".
-     Guardas: decisão repetida → break; resultado "[Erro]" → break.
+   FASE 1: _decide_tool() → parse_decision (backend/agents/planner.py) retorna:
+     • {"type":"none"} — sem ferramenta
+     • {"type":"tool",...} — loop iterativo até max_rounds (config: 4); cada rodada
+       recebe os resultados anteriores. Guardas: decisão repetida / "[Erro]" → break.
+     • {"type":"plan","steps":[{"tool","params"},...]} — plano COMPLETO com params,
+       executado passo a passo SEM re-roteamento (formato robusto p/ modelos pequenos).
+       Passos string (legado) são re-roteados com o pedido original anexado.
+       Plano sem nenhum passo executado → contexto força resposta honesta.
    FASE 2: router.stream("chat"|"code", …) → resposta final streamada token a token
    + background tasks (asyncio.create_task): extract_facts_bg, update_profile_bg,
      extract_kg_bg, _summarize_history_bg
    ▼
 backend/providers/router.py — ProviderRouter com fallback automático
-   TASK_FALLBACK: chat=[nvidia,google,cerebras,ollama], tools=[nvidia,ollama], …
-   Erros retriables (429/5xx/timeout/not found) caem para o próximo provider
+   TASK_FALLBACK: chat/tools=[nvidia,google,cerebras,ollama], …
+   Erros retriables (403/410/429/5xx/timeout/not found/gone) → próximo provider
+   Circuit breaker: 2 falhas seguidas pausam o provider por 180s (nunca deixa
+   a lista vazia — se todos pausados, usa a ordem completa)
+   ATENÇÃO (2026-07): NVIDIA free tier instável — meta/llama-* mortos, só
+   mistral-small responde (intermitente). Cerebras: gpt-oss-120b/gemma-4-31b/
+   zai-glm-4.7 (llama3.1-* removidos). Verificar catálogos ao debugar timeout.
 ```
 
 ### Eventos WebSocket (backend → frontend)
@@ -86,8 +96,15 @@ orgulhosa, determinada, codando, jogando, tranquila`
 
 ## Memória (backend/memory/)
 
-- `memory_manager.py` — SQLite: messages (com `is_proactive`), facts,
-  user_profile, conversation_summaries + fachada para KG e vector store.
+- `memory_manager.py` — SQLite: messages (com `is_proactive` e `session`),
+  facts (com `pinned`), user_profile, conversation_summaries + fachada para
+  KG e vector store.
+- **Longo prazo (Fase 5)**: save_fact deduplica por texto normalizado (reforça
+  confiança em vez de duplicar); get_facts aplica decay exponencial (meia-vida
+  30 dias, oculta < 0.25); purge_stale_facts no startup apaga não-fixados
+  < 0.15 com +90 dias; pin_fact/remember_this cria memórias que nunca decaem;
+  search_messages_by_period alimenta a tool search_history ("o que falamos
+  semana passada"); POST /api/memory/consolidate mescla fatos redundantes via LLM.
 - `knowledge_graph.py` — relações entidade→verbo→entidade em SQLite.
 - `profile_manager.py` — perfil estruturado (nome, profissão, interesses…).
 - `vector_store.py` — ChromaDB + embeddings nomic-embed-text.
@@ -103,12 +120,16 @@ orgulhosa, determinada, codando, jogando, tranquila`
   (read/write/list/search com `_safe_path` restrito ao home + PATH_ALIASES
   "desktop"/"documentos"…), desktop_tools (open_url com aliases+TLD completion,
   open_app com busca em PATH/Program Files/registry, set_timer, volume),
-  web_tools (ddgs), media_tools, memory_tools (search_memory),
+  web_tools (ddgs), media_tools,
+  memory_tools (search_memory, search_history, remember_this),
   code_tools (execute_python, subprocess com timeout 8s),
   **vision_tools** (read_screen: OCR da tela via task "ocr" do router, timeout 60s),
   **automation_tools** (press_hotkey/type_text via pyautogui — type_text usa
   clipboard+ctrl+v para texto não-ASCII; list_windows/focus_window via PowerShell;
-  fetch_url via requests + HTMLParser stdlib).
+  fetch_url via httpx + truststore + HTMLParser stdlib),
+  **browser_tools** (Playwright: browser_open/read/click/fill/close — sessão
+  Chromium persistente headed; canais msedge → chrome → bundled, pois o
+  chromium bundled dá erro SxS nesta máquina).
 - Whitelist em `configs/config.yaml → tools.whitelist`.
 - **Plugins (Fase 6)**: `plugins/*.py` com `register(registry)` são carregados no
   boot (config `plugins.enabled`). NÃO passam pela whitelist. Erros isolados
@@ -213,7 +234,6 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
 
 ## Funcionalidades pendentes (roadmap)
 
-- Live2D/lip-sync no avatar (Fase 2 completa do SDD).
-- Playwright para automação de browser completa (opcional — fetch_url cobre
-  leitura de páginas; dependência comentada no requirements.txt).
-- `backend/agents/` ainda vazio (orquestração multi-agente futura).
+- Live2D/lip-sync no avatar (Fase 2 completa do SDD) — único item grande restante.
+- Fases 3, 4 (incl. Playwright + planner), 5 (memória de longo prazo) e 6
+  (plugins + API) estão CONCLUÍDAS e validadas ao vivo (2026-07-15).
