@@ -17,8 +17,11 @@ EMOTION_KEYWORDS: dict[str, list[str]] = {
     "orgulhosa":    ["consegui", "fiz isso", "orgulho", "excelente trabalho"],
     "cansada":      ["cansada", "exausta", "muito trabalho", "preciso de uma pausa", "preocupante", "complicado", "sinto muito"],
     "determinada":  ["vou fazer", "conseguirei", "estou determinada", "não vou desistir"],
-    "codando":      ["código", "função", "bug", "programar", "erro", "compilar", "debug"],
-    "jogando":      ["jogo", "jogar", "game", "gaming", "personagem", "fase", "nível"],
+    # "jogar"/"fase"/"nível"/"personagem" são ambíguos demais em pt-BR
+    # ("jogar o site no navegador", "fase do projeto") — só termos claramente gamer
+    "codando":      ["código", "função", "bug", "programar", "compilar", "debug"],
+    "jogando":      ["jogando", "game", "gaming", "gameplay", "videogame", "video game",
+                     "partida de", "zerei", "zerar o jogo", "no jogo"],
     "tranquila":    ["tranquilo", "calmo", "relaxado", "sem pressa", "tudo bem", "suave"],
     "pensando":     ["na verdade", "pensando bem", "de fato", "por outro lado", "hm"],
     "confusa":      ["hã", "o quê", "tô perdido", "não entendi", "como assim"],

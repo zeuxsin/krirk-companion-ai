@@ -878,6 +878,44 @@ check("KG vazio para NENHUM", _parse_kg_lines("NENHUM") == [])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 20. Keywords de emoção — ambiguidades ("jogar o site" != videogame)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("20. Emocao: keywords ambiguas")
+
+eng_kw = EmotionEngine()
+check("'jogar o site no navegador' NAO vira jogando",
+      eng_kw.analyze_and_update("vou jogar o site do salão no navegador pra gente mexer") != "jogando")
+eng_kw2 = EmotionEngine()
+check("'to jogando valorant' vira jogando",
+      eng_kw2.analyze_and_update("to jogando valorant com os amigos") == "jogando")
+eng_kw3 = EmotionEngine()
+check("'fase do projeto' NAO vira jogando",
+      eng_kw3.analyze_and_update("estamos na fase final do projeto") != "jogando")
+eng_kw4 = EmotionEngine()
+check("'erro meu, desculpa' NAO vira codando",
+      eng_kw4.analyze_and_update("erro meu, desculpa pela confusão") != "codando")
+eng_kw5 = EmotionEngine()
+check("'achei um bug no código' vira codando",
+      eng_kw5.analyze_and_update("achei um bug no código, vou debugar") == "codando")
+
+# Regra anti-promessa presente no núcleo do prompt
+prompt_core = PersonalitySystem("configs/personality.json").build_system_prompt(current_emotion="neutro")
+check("nucleo proibe alegar acao em qualquer tempo verbal", "QUALQUER tempo verbal" in prompt_core)
+check("nucleo orienta a oferecer e esperar pedido", "OFEREÇA" in prompt_core)
+
+# Detector de alegação de ação (guarda de honestidade)
+from backend.core.orchestrator import _claims_action
+
+check("detecta 'Abrindo o Firefox'", _claims_action("Abrindo o Firefox pra você agora."))
+check("detecta 'vou abrir'", _claims_action("Beleza, vou abrir o site do salão."))
+check("detecta 'só um segundo'", _claims_action("Deixa comigo, só um segundo."))
+check("oferta NAO e alegacao", not _claims_action("Quer que eu abra o site? É só pedir."))
+check("conversa normal NAO e alegacao", not _claims_action("O site do salão tá ficando ótimo, Erik."))
+check("'abriu' do usuario em citacao... conversa comum ok", not _claims_action("legal que o navegador funcionou"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

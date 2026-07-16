@@ -84,6 +84,21 @@ def _parse_fact_lines(raw: str) -> list[str]:
     return facts
 
 
+# Alegações de ação que a Krirk NÃO pode fazer sem ferramenta executada —
+# usado como telemetria de honestidade (loga quando o modelo alucina ação)
+_ACTION_CLAIM_RE = re.compile(
+    r"\b(vou abrir|abrindo|acabei de abrir|abri o|abri a|vou executar|executando|"
+    r"vou rodar|rodando o|vou criar o arquivo|criando o arquivo|salvando|"
+    r"deixa comigo|s[óo] um segundo|um momento enquanto)\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_action(text: str) -> bool:
+    """True se a resposta alega estar executando/ter executado uma ação."""
+    return bool(_ACTION_CLAIM_RE.search(text))
+
+
 # Sujeitos que nunca devem entrar no Knowledge Graph (o grafo é sobre o USUÁRIO;
 # o modelo insiste em extrair relações sobre a própria assistente)
 _KG_BLOCKED_SUBJECTS = {"assistant", "assistente", "krirk", "ia", "ai", "bot", "você", "voce"}
@@ -697,6 +712,28 @@ class Orchestrator:
 
         # Pós-processamento: remove reasoning tags
         clean_response = _strip_reasoning(full_response)
+
+        # Guarda de honestidade: alegou ação ("abrindo o Firefox...") sem ferramenta?
+        # Reescreve uma vez para transformar a alegação em oferta.
+        if not executed_tools and _claims_action(clean_response):
+            print(f"[KRIRK][honestidade] Resposta alega ação sem ferramenta — reescrevendo: {clean_response[:80]}")
+            try:
+                rewritten = await self.router.complete(
+                    "chat",
+                    [{"role": "user", "content": (
+                        "Reescreva a resposta abaixo removendo QUALQUER alegação de que uma "
+                        "ação foi/está sendo executada (abrir, rodar, salvar...). Nenhuma ação "
+                        "aconteceu. Transforme em OFERTA curta e natural, mantendo o tom "
+                        "(ex: 'Quer que eu abra o site? É só pedir.'). Sem emojis, português. "
+                        f"Responda APENAS com a resposta reescrita.\n\nResposta: {clean_response}"
+                    )}],
+                    temperature=0.6, max_tokens=200,
+                )
+                rewritten = _strip_reasoning((rewritten or "").strip())
+                if rewritten and not _claims_action(rewritten):
+                    clean_response = rewritten
+            except Exception as e:
+                print(f"[KRIRK][honestidade] Reescrita falhou: {e}")
 
         new_emotion = self.emotion.analyze_and_update(clean_response)
         self.memory.save_message(user_id, "assistant", clean_response, emotion=new_emotion)
