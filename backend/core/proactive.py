@@ -9,13 +9,19 @@ Condições para comentar:
 """
 import asyncio
 import hashlib
+import json
 import subprocess
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.core.orchestrator import Orchestrator
     from backend.api.websocket import ConnectionManager
+    from backend.core.reflection import ReflectionEngine
+
+_SCHED_STATE = Path("data/reflection_state.json")
 
 
 class ProactiveMonitor:
@@ -24,6 +30,8 @@ class ProactiveMonitor:
         orchestrator: "Orchestrator",
         ws_manager: "ConnectionManager",
         config: dict,
+        reflection: "ReflectionEngine | None" = None,
+        reflection_config: dict | None = None,
     ):
         self._orchestrator  = orchestrator
         self._ws_manager    = ws_manager
@@ -32,6 +40,16 @@ class ProactiveMonitor:
         self._cooldown         = float(config.get("comment_cooldown", 180))
         self._idle_threshold   = float(config.get("user_idle_threshold", 60))
         self._spotify_enabled  = config.get("spotify_enabled", True)
+
+        # ── Motor de reflexão (sonho + pesquisa autônoma) ────────────────────
+        self._reflection = reflection
+        rcfg = reflection_config or {}
+        self._reflection_enabled = rcfg.get("enabled", True)
+        self._dream_every    = float(rcfg.get("dream_every_hours", 3)) * 3600
+        self._research_every = float(rcfg.get("research_every_hours", 6)) * 3600
+        self._reflection_idle = float(rcfg.get("idle_seconds", 120))
+        self._reflection_cooldown = float(rcfg.get("proactive_cooldown", 600))
+        self._last_reflection_comment: float = 0.0
 
         # Estado interno
         self._last_user_msg:   float       = 0.0   # monotonic da última msg do usuário
@@ -70,12 +88,91 @@ class ProactiveMonitor:
             except Exception as e:
                 print(f"[KRIRK][proactive] Erro no loop: {type(e).__name__}: {e}")
 
+    # ── Estado persistido do scheduler (timestamps de dream/research) ─────────
+
+    def _load_sched(self) -> dict:
+        try:
+            if _SCHED_STATE.exists():
+                return json.loads(_SCHED_STATE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
+    def _save_sched(self, state: dict) -> None:
+        try:
+            _SCHED_STATE.parent.mkdir(parents=True, exist_ok=True)
+            _SCHED_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            print(f"[KRIRK][reflection] Falha ao salvar estado: {e}")
+
+    async def _run_reflection(self, now: float) -> bool:
+        """
+        Dispara sonho/pesquisa conforme o tempo decorrido (timestamps persistidos
+        em wall-clock). Retorna True se emitiu um comentário (consome a janela).
+        """
+        if not (self._reflection and self._reflection_enabled):
+            return False
+        # Só reflete com o usuário ocioso
+        if (now - self._last_user_msg) < self._reflection_idle:
+            return False
+
+        state = self._load_sched()
+        wall = datetime.now().timestamp()
+
+        # 1) Compartilha nota de aprendizado pendente (se houver e cooldown ok)
+        if (now - self._last_reflection_comment) >= self._reflection_cooldown and self._ws_manager._active:
+            pending = await self._reflection.format_pending_note()
+            if pending:
+                note_id, comment = pending
+                await self._broadcast_comment(comment, trigger="reflection")
+                self._orchestrator.memory.mark_note_shared(note_id)
+                self._last_reflection_comment = now
+                self._last_comment = now
+                return True
+
+        # 2) Sonho (reflexão) a cada dream_every
+        if (wall - state.get("last_dream", 0)) >= self._dream_every:
+            insights = await self._reflection.dream()
+            state["last_dream"] = wall
+            self._save_sched(state)
+            # Modo ativo: às vezes puxa assunto sobre um insight novo
+            if (self._reflection.active_mode and insights and self._ws_manager._active
+                    and (now - self._last_reflection_comment) >= self._reflection_cooldown):
+                comment = await self._voice_insight(insights[0])
+                if comment:
+                    await self._broadcast_comment(comment, trigger="reflection")
+                    self._last_reflection_comment = now
+                    self._last_comment = now
+                    return True
+
+        # 3) Pesquisa autônoma a cada research_every
+        if (wall - state.get("last_research", 0)) >= self._research_every:
+            await self._reflection.research()
+            state["last_research"] = wall
+            self._save_sched(state)
+
+        return False
+
+    async def _voice_insight(self, insight: str) -> str | None:
+        """Transforma um insight cru em uma fala natural de puxar assunto."""
+        prompt = (
+            "Você é a Krirk. Você percebeu isto sobre o usuário: "
+            f"\"{insight}\".\n"
+            "Puxe assunto sobre isso de forma leve e natural, UMA frase curta "
+            "(máx 25 palavras), em português, sem soar invasiva. Sem emojis."
+        )
+        return await self._call_llm_text(prompt)
+
     async def _tick(self) -> None:
         # Respeita o toggle de runtime — desativado pelo usuário nas Configurações
         if not self._enabled:
             return
 
         now = time.monotonic()
+
+        # 0. Reflexão autônoma (sonho/pesquisa/nota) — gate próprio
+        if await self._run_reflection(now):
+            return
 
         # 1. Verifica cooldown global
         if (now - self._last_comment) < self._cooldown:

@@ -49,6 +49,16 @@ proactive:
   user_idle_threshold: 60  # segundos de inatividade do usuário antes de comentar
   spotify_enabled: true    # detectar troca de música no Spotify
 
+# ── Reflexão / vida interior (sonho + pesquisa autônoma) ─────────────────────
+reflection:
+  enabled: true
+  active_mode: true          # true = puxa assunto sobre insights; false = só enriquece o prompt
+  dream_every_hours: 3       # intervalo entre reflexões (sonhos)
+  research_every_hours: 6    # intervalo entre pesquisas autônomas
+  idle_seconds: 120          # só reflete com o usuário ocioso há N segundos
+  proactive_cooldown: 600    # mínimo entre comentários de reflexão
+  max_insights_in_prompt: 5  # insights injetados no system prompt
+
 context_management:
   enabled: true
   max_history_tokens: 3000   # acima disto, recorta histórico e usa resumo salvo

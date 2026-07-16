@@ -670,6 +670,41 @@ check("nucleo fixo sobrevive ao kernel", "Home:" in prompt_k and "Nunca use emoj
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 15. Reflexão Fase B — parser e nota pendente
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("15. Reflexao (Fase B)")
+
+from backend.core.reflection import _extract_json, _strip_emojis, ReflectionEngine
+
+check("extract_json objeto simples", _extract_json('{"a": 1}') == {"a": 1})
+check("extract_json com cerca/prosa", _extract_json('resultado: {"insights": ["x"]} fim')["insights"] == ["x"])
+check("extract_json invalido -> None", _extract_json("sem json aqui") is None)
+
+check("strip_emojis remove emoji", _strip_emojis("que legal 🔥🚀 demais") == "que legal demais")
+check("strip_emojis preserva texto", _strip_emojis("texto normal sem emoji") == "texto normal sem emoji")
+
+# ReflectionEngine.format_pending_note com um memory falso
+class _FakeMem:
+    def __init__(self, notes): self._notes = notes
+    def get_unshared_notes(self, user_id, limit=1): return self._notes[:limit]
+
+class _FakeOrch:
+    def __init__(self, notes): self.memory = _FakeMem(notes)
+
+async def _run_format(notes):
+    eng = ReflectionEngine(_FakeOrch(notes), {"active_mode": True})
+    return await eng.format_pending_note()
+
+res = asyncio.run(_run_format([{"id": 5, "topic": "buracos negros", "content": "eles evaporam"}]))
+check("format_pending_note monta comentario", res is not None and res[0] == 5 and "buracos negros" in res[1])
+check("format_pending_note vazio -> None", asyncio.run(_run_format([])) is None)
+
+eng_active = ReflectionEngine(_FakeOrch([]), {"active_mode": False})
+check("active_mode reflete config", eng_active.active_mode is False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

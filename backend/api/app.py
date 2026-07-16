@@ -38,9 +38,17 @@ def create_app() -> FastAPI:
 
     orchestrator = Orchestrator(config)
 
-    # Monitor proativo — inicia loop de observação de tela e Spotify
+    # Motor de reflexão — sonho + pesquisa autônoma
+    from backend.core.reflection import ReflectionEngine
+    reflection_cfg = config.get("reflection", {"enabled": False})
+    reflection_engine = ReflectionEngine(orchestrator, reflection_cfg)
+
+    # Monitor proativo — inicia loop de observação de tela e Spotify + reflexão
     proactive_cfg = config.get("proactive", {"enabled": False})
-    proactive_monitor = ProactiveMonitor(orchestrator, ws_manager, proactive_cfg)
+    proactive_monitor = ProactiveMonitor(
+        orchestrator, ws_manager, proactive_cfg,
+        reflection=reflection_engine, reflection_config=reflection_cfg,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -156,6 +164,18 @@ def create_app() -> FastAPI:
     async def consolidate_memory(user_id: str = "default"):
         """Consolida fatos duplicados/redundantes via LLM (Fase 5)."""
         return await orchestrator.consolidate_facts(user_id)
+
+    @app.post("/api/reflection/dream")
+    async def force_dream(user_id: str = "default"):
+        """Dispara uma reflexão (sonho) sob demanda — insights, humor, bordões, diário."""
+        insights = await reflection_engine.dream(user_id)
+        return {"insights": insights}
+
+    @app.post("/api/reflection/research")
+    async def force_research(user_id: str = "default"):
+        """Dispara uma pesquisa autônoma sob demanda — gera nota de aprendizado."""
+        note = await reflection_engine.research(user_id)
+        return {"note": note}
 
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):
