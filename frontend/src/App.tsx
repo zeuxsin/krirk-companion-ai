@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { Sidebar, AppMode } from './components/Sidebar'
 import { ChatMode } from './components/ChatMode'
@@ -77,6 +78,8 @@ export default function App() {
   // ── Estado de mensagens — chat e coder têm históricos separados ─────────
   const [messages,     setMessages]     = useState<Message[]>([])
   const [codeMessages, setCodeMessages] = useState<Message[]>([])
+  // Propostas de auto-modificação aguardando consentimento
+  const [proposals, setProposals] = useState<{ id: number; kind: string; rationale: string }[]>([])
   // Qual sessão está recebendo tokens agora ('chat' | 'code')
   const activeSessionRef = useRef<'chat' | 'code'>('chat')
   const streamingIdRef   = useRef<string | null>(null)
@@ -223,6 +226,12 @@ export default function App() {
         })
         return
       }
+      if (ev.type === 'consent_request' && ev.proposal) {
+        // A Krirk quer uma auto-modificação — aguarda aprovação do usuário
+        const pr = ev.proposal
+        setProposals(p => p.some(x => x.id === pr.id) ? p : [...p, pr])
+        return
+      }
       if (ev.type === 'screenshot_taken' && ev.thumbnail) {
         // Screenshots sempre no chat
         setMessages(p => [...p, {
@@ -244,6 +253,15 @@ export default function App() {
     })
     return unsub
   }, [onEvent, addMsg, appendToken, finalizeMsg])
+
+  // ── Responder a uma proposta de auto-modificação ──────────────────────────
+  const respondProposal = useCallback(async (id: number, approve: boolean) => {
+    setProposals(p => p.filter(x => x.id !== id))
+    try {
+      const base = `http://${window.location.hostname}:8000`
+      await fetch(`${base}/api/proposals/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST' })
+    } catch { /* backend offline */ }
+  }, [])
 
   // ── Sincroniza emoção/estado com a janela float independente ──────────────
   useEffect(() => {
@@ -321,6 +339,7 @@ export default function App() {
       height: '100vh', display: 'flex', flexDirection: 'row',
       background: 'var(--color-krirk-bg)', overflow: 'hidden',
     }}>
+      <ConsentCards proposals={proposals} onRespond={respondProposal} />
       <Sidebar
         mode={mode}
         setMode={handleSetMode}
@@ -355,4 +374,55 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+// ── Cards de consentimento — auto-modificações aguardando aprovação ──────────
+const KIND_LABELS: Record<string, string> = {
+  sublation: 'reorganizar as próprias memórias',
+  kernel: 'reescrever a própria identidade',
+  wipe_memory: 'apagar toda a memória',
+}
+
+function ConsentCards({
+  proposals, onRespond,
+}: {
+  proposals: { id: number; kind: string; rationale: string }[]
+  onRespond: (id: number, approve: boolean) => void
+}) {
+  if (proposals.length === 0) return null
+  return (
+    <div style={{
+      position: 'fixed', bottom: 16, right: 16, zIndex: 1000,
+      display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 340,
+    }}>
+      {proposals.map(p => (
+        <div key={p.id} style={{
+          background: 'var(--color-krirk-sidebar, #1a1a24)',
+          border: '1px solid #7c3aed',
+          borderRadius: 10, padding: 14,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', marginBottom: 4 }}>
+            A Krirk quer {KIND_LABELS[p.kind] ?? p.kind}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--color-krirk-text, #ddd)', marginBottom: 10, lineHeight: 1.5 }}>
+            {p.rationale || 'Ela pediu sua permissão antes de mudar algo sobre si mesma.'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => onRespond(p.id, false)} style={consentBtn(false)}>Recusar</button>
+            <button onClick={() => onRespond(p.id, true)} style={consentBtn(true)}>Aprovar</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function consentBtn(primary: boolean): CSSProperties {
+  return {
+    padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+    fontSize: 12, fontWeight: 600,
+    background: primary ? '#7c3aed' : 'transparent',
+    color: primary ? '#fff' : 'rgba(255,255,255,0.6)',
+  }
 }

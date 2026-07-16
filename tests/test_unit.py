@@ -705,6 +705,66 @@ check("active_mode reflete config", eng_active.active_mode is False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 16. Consentimento Fase C — tiers e propostas encenadas
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("16. Consentimento (Fase C)")
+
+from backend.core.consent import ConsentManager, tier_of
+
+check("diario e tier 0 (livre)", tier_of("diary") == 0)
+check("learning_note e tier 1", tier_of("learning_note") == 1)
+check("sublation e tier 2 (consentimento)", tier_of("sublation") == 2)
+check("kernel e tier 2", tier_of("kernel") == 2)
+check("wipe_memory e tier 3", tier_of("wipe_memory") == 3)
+check("kind desconhecido -> tier 2 por seguranca", tier_of("qualquer_coisa") == 2)
+
+tmpC = Path(tempfile.mkdtemp(prefix="krirk_consent_"))
+try:
+    mmC = MemoryManager(db_path=str(tmpC / "t.db"), chroma_path=str(tmpC / "c"))
+    mmC._vectors = None
+    U = "default"   # ConsentManager aplica sempre no usuário 'default' (app single-user)
+
+    class _OrchC:
+        def __init__(self, mem): self.memory = mem
+    cm = ConsentManager(_OrchC(mmC))
+
+    check("requires_consent para sublation", cm.requires_consent("sublation"))
+    check("nao requer para diary", not cm.requires_consent("diary"))
+
+    # Tier 0 aplica direto
+    r0 = cm.stage("lexicon_add", {"term": "test", "meaning": "teste"})
+    check("tier 0 aplica direto", r0["applied"] is True)
+    check("lexicon recebeu o termo", len(mmC.get_lexicon(U)) == 1)
+
+    # Tier 2 encena como proposta
+    mmC.save_fact(U, "fato a"); mmC.save_fact(U, "fato b")
+    r2 = cm.stage("sublation", {"facts": ["fato consolidado"]}, rationale="fundir")
+    check("tier 2 nao aplica direto", r2["applied"] is False and "proposal_id" in r2)
+    check("proposta aparece pendente", len(cm.list_pending()) == 1)
+
+    # Rejeitar nao aplica
+    cm.reject(r2["proposal_id"])
+    check("rejeitar limpa a fila", cm.list_pending() == [])
+    check("rejeitar preservou os fatos", len(mmC.get_facts_full(U)) == 2)
+
+    # Aprovar aplica
+    r3 = cm.stage("sublation", {"facts": ["fato unico consolidado"]}, rationale="fundir 2")
+    ap = cm.approve(r3["proposal_id"])
+    check("aprovar retorna ok", ap["ok"] is True)
+    facts_after = [f["fact"] for f in mmC.get_facts_full(U)]
+    check("aprovar aplicou a sublation", facts_after == ["fato unico consolidado"])
+    check("fila vazia apos aprovar", cm.list_pending() == [])
+
+    # Kernel via consentimento
+    rk = cm.stage("kernel", {"content": "Nova identidade da Krirk"}, rationale="evolui")
+    cm.approve(rk["proposal_id"])
+    check("kernel aprovado vira ativo", mmC.get_active_kernel() == "Nova identidade da Krirk")
+finally:
+    shutil.rmtree(tmpC, ignore_errors=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -56,4 +56,15 @@ export interface WSEvent {
     tts_enabled: boolean
     stt_enabled: boolean
   }
+  proposal?: {          // evento consent_request — auto-modificação encenada
+    id: number
+    kind: string
+    rationale: string
+  }
+}
+
+export interface ConsentProposal {
+  id: number
+  kind: string
+  rationale: string
 }

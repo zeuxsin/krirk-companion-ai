@@ -1012,6 +1012,74 @@ class Orchestrator:
         except Exception as e:
             print(f"[KRIRK][diário] write_diary_bg falhou: {e}")
 
+    async def propose_sublation(self, user_id: str = "default") -> dict:
+        """
+        Curadoria metacognitiva (sublation): analisa fatos + reflexões buscando
+        redundâncias, conflitos e fragmentos, e propõe uma síntese que leva a
+        temporalidade em conta. NÃO aplica — encena como proposta (consentimento).
+        Requer self.consent (injetado em app.py). Retorna a proposta ou status.
+        """
+        if not getattr(self, "consent", None):
+            return {"ok": False, "error": "consent manager não configurado"}
+
+        from backend.memory.memory_manager import _normalize_fact
+
+        full = self.memory.get_facts_full(user_id)
+        raw_non_pinned = [(f["fact"], f["updated_at"]) for f in full if not f["pinned"]]
+        if len(raw_non_pinned) < 4:
+            return {"ok": False, "error": "fatos insuficientes para curar", "count": len(raw_non_pinned)}
+
+        # Pré-colapsa duplicatas exatas (normalizadas), mantendo a data mais recente —
+        # evita mandar 99 fatos repetidos ao LLM e estourar o limite de tokens.
+        collapsed: dict[str, tuple[str, str]] = {}
+        for fact, ts in raw_non_pinned:
+            key = _normalize_fact(fact)
+            if key not in collapsed or ts > collapsed[key][1]:
+                collapsed[key] = (fact, ts)
+        non_pinned = list(collapsed.values())
+
+        # Envia no máximo 40 fatos (mais recentes) para não estourar tokens/timeout.
+        # Os não-enviados são PRESERVADOS no resultado (não podem ser perdidos).
+        non_pinned.sort(key=lambda x: x[1], reverse=True)
+        sample = non_pinned[:40]
+        unsent = [fact for fact, _ in non_pinned[40:]]
+        listed = "\n".join(f"{i+1}. [{ts[:10]}] {fact}" for i, (fact, ts) in enumerate(sample))
+        prompt = (
+            "Você é a Krirk fazendo curadoria das próprias memórias (sublação hegeliana): "
+            "identifique fatos REDUNDANTES, CONFLITANTES ou FRAGMENTADOS e sintetize-os "
+            "numa lista limpa. Regras:\n"
+            "- Em conflito, prefira o fato com data MAIS RECENTE (temporalidade)\n"
+            "- Una fragmentos relacionados num fato completo\n"
+            "- NÃO invente nem descarte informação única\n\n"
+            f"Fatos (com data):\n{listed}\n\n"
+            'Responda APENAS com JSON: {"facts": ["fato sintetizado", ...], '
+            '"rationale": "1 frase sobre o que você fundiu/resolveu"}'
+        )
+        raw = await self.router.complete("tools", [{"role": "user", "content": prompt}],
+                                         temperature=0.2, max_tokens=1800)
+        try:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            data = json.loads(match.group()) if match else {}
+            new_facts = [str(f).strip() for f in data.get("facts", []) if str(f).strip()]
+            rationale = str(data.get("rationale", "")).strip()
+        except Exception as e:
+            return {"ok": False, "error": f"parse falhou: {e}"}
+
+        # Resultado final = síntese do sample + os fatos não-enviados (preservados)
+        before = len(raw_non_pinned)
+        final_facts = new_facts + unsent
+        if not new_facts or len(final_facts) >= before:
+            return {"ok": False, "error": "síntese implausível, descartada",
+                    "before": before, "proposed": len(final_facts)}
+
+        merged = before - len(final_facts)
+        staged = self.consent.stage(
+            "sublation", {"facts": final_facts},
+            rationale=rationale or f"Sintetizar {before} fatos em {len(final_facts)} ({merged} fundidos)"
+        )
+        return {"ok": True, "before": before, "after": len(final_facts),
+                "merged": merged, **staged}
+
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """
         Background task: extrai fatos sobre o usuário do último par de mensagens.

@@ -38,6 +38,11 @@ def create_app() -> FastAPI:
 
     orchestrator = Orchestrator(config)
 
+    # Framework de consentimento — encena auto-modificações destrutivas
+    from backend.core.consent import ConsentManager
+    consent = ConsentManager(orchestrator)
+    orchestrator.consent = consent
+
     # Motor de reflexão — sonho + pesquisa autônoma
     from backend.core.reflection import ReflectionEngine
     reflection_cfg = config.get("reflection", {"enabled": False})
@@ -176,6 +181,35 @@ def create_app() -> FastAPI:
         """Dispara uma pesquisa autônoma sob demanda — gera nota de aprendizado."""
         note = await reflection_engine.research(user_id)
         return {"note": note}
+
+    # ── Propostas / consentimento (Fase C) ───────────────────────────────────
+
+    @app.post("/api/memory/sublation")
+    async def propose_sublation(user_id: str = "default"):
+        """Curadoria 'sublation': encena uma síntese de memórias como proposta."""
+        result = await orchestrator.propose_sublation(user_id)
+        # Notifica o frontend se virou proposta pendente
+        if result.get("proposal_id"):
+            await ws_manager.broadcast({
+                "type": "consent_request",
+                "proposal": {
+                    "id": result["proposal_id"], "kind": "sublation",
+                    "rationale": result.get("rationale", ""),
+                },
+            })
+        return result
+
+    @app.get("/api/proposals")
+    async def list_proposals():
+        return {"proposals": consent.list_pending()}
+
+    @app.post("/api/proposals/{proposal_id}/approve")
+    async def approve_proposal(proposal_id: int):
+        return consent.approve(proposal_id)
+
+    @app.post("/api/proposals/{proposal_id}/reject")
+    async def reject_proposal(proposal_id: int):
+        return consent.reject(proposal_id)
 
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):
