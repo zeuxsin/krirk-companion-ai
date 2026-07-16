@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  Bot, Sparkles, Brain, Moon, Palette, Cpu,
+  MessageSquare, Pin, Link2, Heart,
+  Scale, Fingerprint, Laugh, Lightbulb, BookOpen,
+  Target, Smile, Shuffle, AlertTriangle, X,
+} from 'lucide-react'
 
 type SettingsTab = 'models' | 'personality' | 'memory' | 'interior' | 'appearance' | 'hardware'
 
@@ -168,9 +174,7 @@ function HardwareTab() {
   }, [])
 
   if (error) return (
-    <div style={{ color: 'var(--color-krirk-muted)', fontSize: 12, padding: 12 }}>
-      ⚠️ Backend offline — inicie o servidor Python
-    </div>
+    <OfflineNotice />
   )
 
   return (
@@ -514,14 +518,28 @@ const X_BTN: React.CSSProperties = {
   transition: 'color 0.15s',
 }
 
-function SectionHeader({ title, count }: { title: string; count?: number }) {
+function SectionHeader({ title, count, icon }: { title: string; count?: number; icon?: React.ReactNode }) {
   return (
     <div style={{
       fontSize: 11, fontWeight: 700, color: 'var(--color-krirk-muted)',
       textTransform: 'uppercase', letterSpacing: '0.08em',
       marginTop: 20, marginBottom: 10,
+      display: 'flex', alignItems: 'center', gap: 6,
     }}>
-      {title}{count !== undefined ? ` (${count})` : ''}
+      {icon}
+      <span>{title}{count !== undefined ? ` (${count})` : ''}</span>
+    </div>
+  )
+}
+
+function OfflineNotice() {
+  return (
+    <div style={{
+      fontSize: 12, color: 'var(--color-krirk-muted)', padding: 12,
+      display: 'flex', alignItems: 'center', gap: 6,
+    }}>
+      <AlertTriangle size={13} style={{ flexShrink: 0, color: '#f59e0b' }} />
+      Backend offline — inicie o servidor Python
     </div>
   )
 }
@@ -610,9 +628,7 @@ function MemoryTab() {
   )
 
   if (error) return (
-    <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 12 }}>
-      ⚠️ Backend offline — inicie o servidor Python
-    </div>
+    <OfflineNotice />
   )
 
   const s = data!.stats
@@ -633,17 +649,20 @@ function MemoryTab() {
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
       }}>
         {[
-          { label: '💬 Mensagens',  value: s.total_messages },
-          { label: '📌 Fatos',      value: s.facts_stored },
-          { label: '🔗 Relações KG', value: s.kg_relations },
-          { label: '❤️ Intimidade', value: `${s.intimacy_level.toFixed(1)}` },
-        ].map(({ label, value }) => (
+          { label: 'Mensagens',   value: s.total_messages,               Icon: MessageSquare },
+          { label: 'Fatos',       value: s.facts_stored,                 Icon: Pin },
+          { label: 'Relações KG', value: s.kg_relations,                 Icon: Link2 },
+          { label: 'Intimidade',  value: `${s.intimacy_level.toFixed(1)}`, Icon: Heart },
+        ].map(({ label, value, Icon }) => (
           <div key={label} style={{
             background: 'var(--color-krirk-surface)',
             borderRadius: 8, padding: '8px 10px',
             border: '1px solid var(--color-krirk-border)',
           }}>
-            <div style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginBottom: 2 }}>{label}</div>
+            <div style={{
+              fontSize: 10, color: 'var(--color-krirk-muted)', marginBottom: 2,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}><Icon size={10} /> {label}</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-krirk-text)' }}>{value}</div>
           </div>
         ))}
@@ -780,11 +799,11 @@ interface Reflection { content: string; category: string; created_at: string }
 interface KernelVersion { id: number; note: string; active: number; created_at: string }
 interface PendingProposal { id: number; kind: string; rationale: string; tier: number }
 
-const BRAIN_MODES = [
-  { id: 'focused',  label: '🎯 Focada',   desc: 'precisa e direta' },
-  { id: 'chill',    label: '😌 Tranquila', desc: 'equilibrada (padrão)' },
-  { id: 'creative', label: '🎨 Criativa',  desc: 'solta e inventiva' },
-  { id: 'chaos',    label: '🌀 Caos',      desc: 'imprevisível' },
+const BRAIN_MODES: { id: string; label: string; desc: string; Icon: React.ElementType }[] = [
+  { id: 'focused',  label: 'Focada',    desc: 'precisa e direta',     Icon: Target },
+  { id: 'chill',    label: 'Tranquila', desc: 'equilibrada (padrão)', Icon: Smile },
+  { id: 'creative', label: 'Criativa',  desc: 'solta e inventiva',    Icon: Sparkles },
+  { id: 'chaos',    label: 'Caos',      desc: 'imprevisível',         Icon: Shuffle },
 ]
 
 const KIND_DESC: Record<string, string> = {
@@ -888,7 +907,7 @@ function InteriorTab() {
   }
 
   if (loading) return <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 16 }}>Carregando vida interior…</div>
-  if (error) return <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 12 }}>⚠️ Backend offline — inicie o servidor Python</div>
+  if (error) return <OfflineNotice />
 
   return (
     <div>
@@ -902,7 +921,7 @@ function InteriorTab() {
       {/* ── Propostas pendentes ── */}
       {proposals.length > 0 && (
         <>
-          <SectionHeader title="⚖️ Aguardando sua aprovação" count={proposals.length} />
+          <SectionHeader title="Aguardando sua aprovação" count={proposals.length} icon={<Scale size={12} />} />
           {proposals.map(p => (
             <div key={p.id} style={{ ...cardStyle, border: '1px solid #7c3aed' }}>
               <div style={{ fontWeight: 700, color: '#a78bfa', marginBottom: 3 }}>
@@ -919,7 +938,7 @@ function InteriorTab() {
       )}
 
       {/* ── Brain-state ── */}
-      <SectionHeader title="🧠 Estado mental (geração)" />
+      <SectionHeader title="Estado mental (geração)" icon={<Brain size={12} />} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {BRAIN_MODES.map(m => (
           <button key={m.id} onClick={() => setBrain(m.id)} style={{
@@ -928,14 +947,17 @@ function InteriorTab() {
             background: brainState === m.id ? 'rgba(124,58,237,0.15)' : 'var(--color-krirk-surface)',
             color: 'var(--color-krirk-text)',
           }}>
-            <div style={{ fontSize: 11, fontWeight: 600 }}>{m.label}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <m.Icon size={12} style={{ color: brainState === m.id ? '#a78bfa' : 'var(--color-krirk-muted)' }} />
+              {m.label}
+            </div>
             <div style={{ fontSize: 9, color: 'var(--color-krirk-muted)' }}>{m.desc}</div>
           </button>
         ))}
       </div>
 
       {/* ── Identidade (kernel) ── */}
-      <SectionHeader title="🪞 Identidade (kernel)" />
+      <SectionHeader title="Identidade (kernel)" icon={<Fingerprint size={12} />} />
       <div style={cardStyle}>
         {kernelActive ? (
           <div style={{ fontStyle: 'italic', color: 'var(--color-krirk-text)' }}>{kernelActive}</div>
@@ -963,24 +985,26 @@ function InteriorTab() {
       ))}
 
       {/* ── Bordões / memes internos ── */}
-      <SectionHeader title="😂 Bordões de vocês" count={lexicon.length} />
+      <SectionHeader title="Bordões de vocês" count={lexicon.length} icon={<Laugh size={12} />} />
       {lexicon.length === 0 && <div style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhum ainda — diga "esse é nosso bordão: ..." no chat.</div>}
       {lexicon.map(t => (
         <div key={t.term} style={{ ...cardStyle, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
             <span style={{ fontWeight: 700, color: '#a78bfa' }}>"{t.term}"</span>
-            {t.pinned ? <span style={{ fontSize: 9, marginLeft: 6 }}>📌</span> : null}
+            {t.pinned ? <Pin size={9} style={{ marginLeft: 6, verticalAlign: '-1px', color: '#a78bfa' }} /> : null}
             <span style={{ fontSize: 9, color: 'var(--color-krirk-muted)', marginLeft: 6 }}>usado {t.usage_count}×</span>
             <div style={{ color: 'var(--color-krirk-muted)', marginTop: 2 }}>{t.meaning}</div>
           </div>
           <button onClick={() => deleteTerm(t.term)} title="Esquecer este bordão"
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 12 }}>✕</button>
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 0, display: 'flex' }}>
+            <X size={12} />
+          </button>
         </div>
       ))}
 
       {/* ── Reflexões ── */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <SectionHeader title="💡 O que ela percebe sobre você" count={reflections.length} />
+        <SectionHeader title="O que ela percebe sobre você" count={reflections.length} icon={<Lightbulb size={12} />} />
         <button onClick={forceDream} disabled={busy === 'dream'} style={{ ...smallBtn, marginTop: 12 }}>
           {busy === 'dream' ? 'Sonhando…' : 'Refletir agora'}
         </button>
@@ -994,7 +1018,7 @@ function InteriorTab() {
       ))}
 
       {/* ── Diário ── */}
-      <SectionHeader title="📓 Diário dela" count={diary.length} />
+      <SectionHeader title="Diário dela" count={diary.length} icon={<BookOpen size={12} />} />
       {diary.length === 0 && <div style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhuma entrada ainda.</div>}
       {diary.map((d, i) => (
         <div key={i} style={{ ...cardStyle, fontStyle: 'italic' }}>
@@ -1010,13 +1034,13 @@ function InteriorTab() {
 
 // ── Shell principal ───────────────────────────────────────────────────────────
 
-const TABS: { id: SettingsTab; label: string; icon: string }[] = [
-  { id: 'models',      label: 'Modelos',       icon: '🤖' },
-  { id: 'personality', label: 'Personalidade', icon: '✨' },
-  { id: 'memory',      label: 'Memória',       icon: '🧠' },
-  { id: 'interior',    label: 'Vida Interior', icon: '💭' },
-  { id: 'appearance',  label: 'Aparência',     icon: '🎨' },
-  { id: 'hardware',    label: 'Hardware',      icon: '💻' },
+const TABS: { id: SettingsTab; label: string; Icon: React.ElementType }[] = [
+  { id: 'models',      label: 'Modelos',       Icon: Bot },
+  { id: 'personality', label: 'Personalidade', Icon: Sparkles },
+  { id: 'memory',      label: 'Memória',       Icon: Brain },
+  { id: 'interior',    label: 'Vida Interior', Icon: Moon },
+  { id: 'appearance',  label: 'Aparência',     Icon: Palette },
+  { id: 'hardware',    label: 'Hardware',      Icon: Cpu },
 ]
 
 export function SettingsPage() {
@@ -1042,7 +1066,7 @@ export function SettingsPage() {
         }}>
           KRIRK
         </div>
-        {TABS.map(({ id, label, icon }) => (
+        {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -1057,7 +1081,7 @@ export function SettingsPage() {
               borderLeft: tab === id ? '2px solid #818cf8' : '2px solid transparent',
             }}
           >
-            <span style={{ fontSize: 14 }}>{icon}</span>
+            <Icon size={14} style={{ flexShrink: 0 }} />
             <span>{label}</span>
           </button>
         ))}
