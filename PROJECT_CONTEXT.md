@@ -232,8 +232,39 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
   tools_used[], audio?} — resposta completa, sem streaming, para integrações.
 - `GET /api/tools` → lista de tools registradas (builtin + plugins) com params.
 
+## Interioridade escafoldada (diário, sonhos, identidade)
+
+Camada de "vida interior autônoma" inspirada no companion do LocalLLaMA.
+Armazéns em `memory_manager.py`: `lexicon`, `reflections`, `diary`,
+`learning_notes`, `kernel_versions`, `pending_proposals`.
+
+- **Memes internos**: tool `coin_term` cunha bordões (injetados no prompt,
+  `touch_term` reforça o uso); `search_meme` busca gírias na web. `_detect_amusement`
+  marca trocas engraçadas.
+- **Diário autônomo**: `write_diary_bg` escreve entrada em 1ª pessoa após trocas
+  com substância (bg task no `process_text`).
+- **Reflexão** (`backend/core/reflection.py`): `dream()` sintetiza insights/humor/
+  bordões + entrada de sonho; `research()` pesquisa um tópico e guarda nota de
+  aprendizado. Agendados pelo `ProactiveMonitor` (timestamps em
+  `data/reflection_state.json`; dream 3h, research 6h). Modo ativo puxa assunto.
+- **Sublation** (`orchestrator.propose_sublation`): cura fatos redundantes/
+  conflitantes com temporalidade. Pré-colapsa dupes exatas, envia ≤40 ao LLM,
+  preserva os não-enviados. Encena como proposta.
+- **Consentimento** (`backend/core/consent.py`): tiers 0-3; ações Tier≥2 (sublation,
+  kernel, wipe) viram `pending_proposals` aprovadas/recusadas pelo usuário. Evento
+  WS `consent_request` → card no `App.tsx`.
+- **Brain-state**: tool `set_brain_state` (focused/chill/creative/chaos → temperature
+  + top_p). `top_p` propaga pelo router→providers. Persiste em settings.json.
+- **Kernel auto-autorado**: `propose_kernel` — a Krirk redige a própria persona
+  (Tier 2, consentimento); versionada em `kernel_versions` com rollback
+  (`/api/kernel/rollback`, kernel_id=0 = padrão). Injetada como `persona_kernel`
+  no prompt; o NÚCLEO IMUTÁVEL (formato/segurança) nunca é sobrescrito.
+- Endpoints: `/api/reflection/dream|research`, `/api/memory/sublation`,
+  `/api/proposals[/{id}/approve|reject]`, `/api/kernel[/propose|/rollback]`,
+  `/api/brain_state`.
+
 ## Funcionalidades pendentes (roadmap)
 
 - Live2D/lip-sync no avatar (Fase 2 completa do SDD) — único item grande restante.
-- Fases 3, 4 (incl. Playwright + planner), 5 (memória de longo prazo) e 6
-  (plugins + API) estão CONCLUÍDAS e validadas ao vivo (2026-07-15).
+- Fases 3, 4, 5, 6 e a interioridade escafoldada CONCLUÍDAS e validadas ao vivo.
+- "Council" de outras IAs (do post do Reddit) — fora de escopo por ora.

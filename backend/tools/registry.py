@@ -35,11 +35,12 @@ class ToolRegistry:
         return "\n".join(lines)
 
 
-def build_default_registry(config: dict, memory=None, router=None) -> ToolRegistry:
+def build_default_registry(config: dict, memory=None, router=None, orchestrator=None) -> ToolRegistry:
     """
     Instancia e registra as ferramentas padrão conforme a whitelist do config.
     Importa as tools sob demanda para evitar dependências circulares.
     router: ProviderRouter — necessário para tools que usam LLM (ex: read_screen).
+    orchestrator: para tools que mexem no estado da Krirk (ex: set_brain_state).
     """
     whitelist: list[str] = config.get("whitelist", [])
     registry = ToolRegistry()
@@ -170,6 +171,9 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
                 registry.register(make_remember_fact(memory))
             if "coin_term" in whitelist:
                 registry.register(make_coin_term(memory))
+            if "set_brain_state" in whitelist and orchestrator is not None:
+                from backend.tools.builtin.memory_tools import make_set_brain_state
+                registry.register(make_set_brain_state(orchestrator))
         except Exception as e:
             print(f"[KRIRK][tools] Erro ao carregar memory_tools: {e}")
 

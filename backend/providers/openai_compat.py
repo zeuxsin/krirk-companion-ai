@@ -76,16 +76,19 @@ class OpenAICompatProvider(BaseProvider):
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        top_p: float | None = None,
     ) -> AsyncGenerator[str, None]:
         # Upload de imagens base64 é pesado — timeout maior para visão
         has_images = any(m.get("images") for m in messages)
         client = self._client(timeout=45.0 if has_images else 10.0)
+        extra = {"top_p": top_p} if top_p is not None else {}
         stream = await client.chat.completions.create(
             model=model,
             messages=_to_openai_messages(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
+            **extra,
         )
         async for chunk in stream:
             delta = chunk.choices[0].delta.content if chunk.choices else None
@@ -98,15 +101,18 @@ class OpenAICompatProvider(BaseProvider):
         model: str,
         temperature: float = 0.1,
         max_tokens: int = 512,
+        top_p: float | None = None,
     ) -> str:
         has_images = any(m.get("images") for m in messages)
         client = self._client(timeout=45.0 if has_images else 10.0)
+        extra = {"top_p": top_p} if top_p is not None else {}
         resp = await client.chat.completions.create(
             model=model,
             messages=_to_openai_messages(messages),
             temperature=temperature,
             max_tokens=max_tokens,
             stream=False,
+            **extra,
         )
         return resp.choices[0].message.content or ""
 

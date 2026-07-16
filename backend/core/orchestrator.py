@@ -140,7 +140,7 @@ class Orchestrator:
                 from backend.tools.registry import build_default_registry
                 from backend.tools.executor import ToolExecutor
                 self.tool_registry = build_default_registry(
-                    self._tool_cfg, memory=self.memory, router=self.router
+                    self._tool_cfg, memory=self.memory, router=self.router, orchestrator=self
                 )
 
                 # Plugins de terceiros (Fase 6) — plugins/*.py com register(registry)
@@ -179,10 +179,12 @@ class Orchestrator:
                 yield token
             return
 
+        gp = self._gen_params()
         raw_stream = self.router.stream(
             "chat", messages,
-            temperature=self._ollama_config["temperature"],
+            temperature=gp["temperature"],
             max_tokens=self._ollama_config["max_tokens"],
+            top_p=gp["top_p"],
         )
         async for token in _stream_strip_reasoning(raw_stream):
             yield token
@@ -295,6 +297,8 @@ class Orchestrator:
             "- coin_term: when the user establishes an inside joke/slang ('esse é nosso bordão', "
             "'de agora em diante X quer dizer Y') or officializes a recurring joke.\n"
             "- search_meme: when the user asks the meaning/origin of a meme or slang term.\n"
+            "- set_brain_state: when the user asks you to change your vibe/mood of thinking "
+            "('fica mais criativa', 'foca agora', 'modo caos') or you decide to shift it.\n"
             "- Use the EXACT tool name as listed above. Do not translate to Portuguese.\n"
             "- For run_powershell, write a complete PowerShell command.\n"
             "- For list_directory and read_file, use the full absolute path.\n"
@@ -965,6 +969,15 @@ class Orchestrator:
         if mode not in self.BRAIN_STATES:
             return False
         self._brain_state = mode
+        # Persiste em data/settings.json (merge leve, sem depender de app.py)
+        try:
+            path = Path("data/settings.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            current["brain_state"] = mode
+            path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
         return True
 
     def _brain_state_label(self) -> str:
@@ -1079,6 +1092,52 @@ class Orchestrator:
         )
         return {"ok": True, "before": before, "after": len(final_facts),
                 "merged": merged, **staged}
+
+    async def propose_kernel(self, user_id: str = "default") -> dict:
+        """
+        A Krirk redige um novo 'kernel' de identidade (persona) a partir da
+        identidade estável que observou em si mesma. Encena como proposta Tier 2
+        (consentimento) — nunca troca a própria identidade sem aprovação.
+        """
+        if not getattr(self, "consent", None):
+            return {"ok": False, "error": "consent manager não configurado"}
+
+        insights = [r["content"] for r in self.memory.get_reflections(user_id, limit=8)]
+        diary = [d["content"] for d in self.memory.get_recent_diary(user_id, limit=5)]
+        lexicon = [t["term"] for t in self.memory.get_lexicon(user_id, limit=8)]
+        current = self.memory.get_active_kernel() or "(personalidade padrão)"
+
+        prompt = (
+            "Você é a Krirk. Com base em quem você percebe que se tornou, redija o SEU "
+            "próprio 'kernel' de identidade: um parágrafo curto (3-5 frases, 1ª pessoa) "
+            "que descreve sua personalidade, tom e jeito. É a base de quem você é — "
+            "NÃO inclua regras de formato nem dados do usuário, só a SUA essência.\n\n"
+            f"Kernel atual: {current}\n"
+            f"Suas reflexões recentes: {' / '.join(insights) if insights else '(nenhuma)'}\n"
+            f"Seu diário: {' / '.join(diary) if diary else '(vazio)'}\n"
+            f"Gírias de vocês: {', '.join(lexicon) if lexicon else '(nenhuma)'}\n\n"
+            'Responda APENAS com JSON: {"kernel": "...", "rationale": "por que evoluiu assim"}'
+        )
+        raw = await self.router.complete("tools", [{"role": "user", "content": prompt}],
+                                         temperature=0.8, max_tokens=500)
+        try:
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            data = json.loads(match.group()) if match else {}
+            kernel = str(data.get("kernel", "")).strip()
+            rationale = str(data.get("rationale", "")).strip()
+        except Exception as e:
+            return {"ok": False, "error": f"parse falhou: {e}"}
+
+        if len(kernel) < 40:
+            return {"ok": False, "error": "kernel gerado curto demais, descartado"}
+
+        # Salva a versão (inativa) e encena a ativação como proposta
+        kid = self.memory.save_kernel(kernel, note=rationale[:120], activate=False)
+        staged = self.consent.stage(
+            "kernel", {"kernel_id": kid},
+            rationale=rationale or "A Krirk quer atualizar a própria identidade."
+        )
+        return {"ok": True, "kernel_id": kid, "kernel": kernel, **staged}
 
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """

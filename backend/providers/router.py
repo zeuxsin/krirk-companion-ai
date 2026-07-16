@@ -163,6 +163,7 @@ class ProviderRouter:
         messages: list[dict],
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        top_p: float | None = None,
     ) -> AsyncGenerator[str, None]:
         """Streama tokens tentando providers em ordem de fallback."""
         ordered = self._ordered_providers(task)
@@ -177,7 +178,7 @@ class ProviderRouter:
                 print(f"[KRIRK][router] {task} -> {name}/{model}")
                 async for token in provider.stream_chat(
                     messages, model=model,
-                    temperature=temperature, max_tokens=max_tokens,
+                    temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                 ):
                     yield token
                 self._record_success(name)

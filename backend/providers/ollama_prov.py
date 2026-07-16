@@ -25,13 +25,17 @@ class OllamaProvider(BaseProvider):
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        top_p: float | None = None,
     ) -> AsyncGenerator[str, None]:
         client = self._client()
+        options = {"temperature": temperature, "num_predict": max_tokens}
+        if top_p is not None:
+            options["top_p"] = top_p
         async for chunk in await client.chat(
             model=model,
             messages=messages,
             stream=True,
-            options={"temperature": temperature, "num_predict": max_tokens},
+            options=options,
         ):
             content = chunk.get("message", {}).get("content", "")
             if content:
@@ -43,13 +47,17 @@ class OllamaProvider(BaseProvider):
         model: str,
         temperature: float = 0.1,
         max_tokens: int = 512,
+        top_p: float | None = None,
     ) -> str:
         client = self._client()
+        options = {"temperature": temperature, "num_predict": max_tokens}
+        if top_p is not None:
+            options["top_p"] = top_p
         resp = await client.chat(
             model=model,
             messages=messages,
             stream=False,
-            options={"temperature": temperature, "num_predict": max_tokens},
+            options=options,
         )
         return resp.get("message", {}).get("content", "")
 

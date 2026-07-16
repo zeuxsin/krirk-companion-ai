@@ -765,6 +765,44 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 17. Brain-state e kernel (Fase D)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("17. Brain-state e kernel (Fase D)")
+
+from backend.core.orchestrator import Orchestrator
+
+# Presets de brain-state — mapeamento sem instanciar o Orchestrator inteiro
+bs = Orchestrator.BRAIN_STATES
+check("preset focused baixa temperatura", bs["focused"]["temperature"] == 0.3 and bs["focused"]["top_p"] == 0.80)
+check("preset chaos alta temperatura", bs["chaos"]["temperature"] == 1.3 and bs["chaos"]["top_p"] == 0.98)
+check("4 presets definidos", set(bs.keys()) == {"focused", "chill", "creative", "chaos"})
+
+# top_p propaga pela assinatura dos providers (checagem estatica de assinatura)
+import inspect
+from backend.providers.ollama_prov import OllamaProvider
+from backend.providers.openai_compat import OpenAICompatProvider
+check("ollama stream_chat aceita top_p", "top_p" in inspect.signature(OllamaProvider.stream_chat).parameters)
+check("openai stream_chat aceita top_p", "top_p" in inspect.signature(OpenAICompatProvider.stream_chat).parameters)
+
+# Kernel versionado + rollback via MemoryManager
+tmpD = Path(tempfile.mkdtemp(prefix="krirk_kernel_"))
+try:
+    mmD = MemoryManager(db_path=str(tmpD / "t.db"), chroma_path=str(tmpD / "c"))
+    mmD._vectors = None
+    check("sem kernel -> None (usa persona padrao)", mmD.get_active_kernel() is None)
+    kid1 = mmD.save_kernel("Krirk v1 curiosa", activate=True)
+    kid2 = mmD.save_kernel("Krirk v2 sarcastica", activate=True)
+    check("kernel ativo e o v2", mmD.get_active_kernel() == "Krirk v2 sarcastica")
+    mmD.deactivate_all_kernels()
+    check("deactivate_all volta ao padrao", mmD.get_active_kernel() is None)
+    mmD.activate_kernel(kid1)
+    check("rollback reativa v1", mmD.get_active_kernel() == "Krirk v1 curiosa")
+finally:
+    shutil.rmtree(tmpD, ignore_errors=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

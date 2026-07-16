@@ -593,6 +593,11 @@ class MemoryManager:
             conn.execute("UPDATE kernel_versions SET active=1 WHERE id=?", (kernel_id,))
         return True
 
+    def deactivate_all_kernels(self) -> None:
+        """Volta à persona padrão (nenhum kernel auto-autorado ativo)."""
+        with self._conn() as conn:
+            conn.execute("UPDATE kernel_versions SET active=0")
+
     # ── Propostas pendentes (framework de consentimento) ──────────────────────
 
     def add_proposal(self, kind: str, payload_json: str, rationale: str = "") -> int:

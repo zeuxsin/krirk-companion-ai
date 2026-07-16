@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
             if "tts_voice"         in saved: orchestrator.tts.set_voice(str(saved["tts_voice"]))
             if "stt_enabled"       in saved: orchestrator.stt.set_enabled(bool(saved["stt_enabled"]))
             if "proactive_enabled" in saved: proactive_monitor.set_enabled(bool(saved["proactive_enabled"]))
+            if "brain_state"       in saved: orchestrator.set_brain_state(str(saved["brain_state"]))
         # Esquecimento gradual (Fase 5): purga fatos obsoletos no boot
         try:
             orchestrator.memory.purge_stale_facts("default")
@@ -198,6 +199,41 @@ def create_app() -> FastAPI:
                 },
             })
         return result
+
+    @app.post("/api/kernel/propose")
+    async def propose_kernel(user_id: str = "default"):
+        """A Krirk redige um novo kernel de identidade — encena como proposta."""
+        result = await orchestrator.propose_kernel(user_id)
+        if result.get("proposal_id"):
+            await ws_manager.broadcast({
+                "type": "consent_request",
+                "proposal": {"id": result["proposal_id"], "kind": "kernel",
+                             "rationale": result.get("rationale", "")},
+            })
+        return result
+
+    @app.get("/api/kernel")
+    async def list_kernels():
+        return {"active": orchestrator.memory.get_active_kernel(),
+                "versions": orchestrator.memory.list_kernels()}
+
+    @app.post("/api/kernel/rollback")
+    async def rollback_kernel(request: Request):
+        """Reativa uma versão anterior do kernel (ou volta ao padrão com kernel_id=0)."""
+        body = await request.json()
+        kid = int(body.get("kernel_id", 0))
+        if kid == 0:
+            # Volta ao padrão: desativa todas as versões (usa a persona hardcoded)
+            orchestrator.memory.deactivate_all_kernels()
+            return {"ok": True, "active": None}
+        ok = orchestrator.memory.activate_kernel(kid)
+        return {"ok": ok, "active": orchestrator.memory.get_active_kernel()}
+
+    @app.post("/api/brain_state")
+    async def set_brain_state(request: Request):
+        body = await request.json()
+        mode = str(body.get("mode", ""))
+        return {"ok": orchestrator.set_brain_state(mode), "state": orchestrator._brain_state}
 
     @app.get("/api/proposals")
     async def list_proposals():

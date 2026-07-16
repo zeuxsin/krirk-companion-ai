@@ -183,6 +183,33 @@ def make_coin_term(memory) -> Tool:
     )
 
 
+def make_set_brain_state(orchestrator) -> Tool:
+    """Deixa a Krirk trocar o próprio 'humor de geração' (temperatura/top_p)."""
+
+    async def _set_brain_state(mode: str) -> str:
+        mode = mode.strip().lower()
+        aliases = {"focado": "focused", "concentrada": "focused", "tranquila": "chill",
+                   "de boa": "chill", "criativa": "creative", "criativo": "creative",
+                   "caos": "chaos", "caótica": "chaos", "caotica": "chaos"}
+        mode = aliases.get(mode, mode)
+        if orchestrator.set_brain_state(mode):
+            return f"Mudei meu estado mental para {mode}."
+        return f"[Erro] Estado '{mode}' não existe. Use: focused, chill, creative, chaos."
+
+    return Tool(
+        name="set_brain_state",
+        description=(
+            "Muda o SEU próprio estado mental/humor de geração. Use quando quiser "
+            "mudar sua vibe ou o usuário pedir ('fica mais criativa', 'foca', 'modo caos'). "
+            "Modos: focused (precisa), chill (equilibrada), creative (solta), chaos (imprevisível)."
+        ),
+        params=[
+            ToolParam("mode", "focused | chill | creative | chaos", "string"),
+        ],
+        func=_set_brain_state,
+    )
+
+
 def make_remember_fact(memory) -> Tool:
     """Memoriza permanentemente algo que o usuário pediu explicitamente para lembrar."""
 

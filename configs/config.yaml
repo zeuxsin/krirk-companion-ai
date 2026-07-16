@@ -152,6 +152,7 @@ tools:
     # ── Interioridade: memes internos / cultura compartilhada ──
     - coin_term        # cunha um bordão/gíria interno de vocês dois
     - search_meme      # busca significado de meme/gíria na internet
+    - set_brain_state  # a Krirk troca o próprio humor de geração (focused/chill/creative/chaos)
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:
