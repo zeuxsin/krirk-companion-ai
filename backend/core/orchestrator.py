@@ -63,6 +63,54 @@ def _is_smalltalk(text: str) -> bool:
     return not any(m in t for m in _ACTION_MARKERS)
 
 
+# ── Parsers de extração em background ─────────────────────────────────────────
+# Formato de LINHAS em vez de JSON: fatos/relações contêm aspas e vírgulas em
+# linguagem natural que os modelos não escapam, quebrando json.loads
+# ("Expecting ',' delimiter"). Linhas são à prova disso.
+
+def _parse_fact_lines(raw: str) -> list[str]:
+    """Extrai fatos de linhas '- fato' ou '• fato'. 'NENHUM' → lista vazia."""
+    facts = []
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if line.upper().startswith("NENHUM"):
+            return []
+        for prefix in ("- ", "• ", "* "):
+            if line.startswith(prefix):
+                fact = line[len(prefix):].strip().strip('"').strip()
+                if len(fact) > 8:
+                    facts.append(fact)
+                break
+    return facts
+
+
+# Sujeitos que nunca devem entrar no Knowledge Graph (o grafo é sobre o USUÁRIO;
+# o modelo insiste em extrair relações sobre a própria assistente)
+_KG_BLOCKED_SUBJECTS = {"assistant", "assistente", "krirk", "ia", "ai", "bot", "você", "voce"}
+
+
+def _parse_kg_lines(raw: str) -> list[tuple[str, str, str]]:
+    """
+    Extrai relações de linhas 'entidade | relacao | entidade'.
+    Filtra lixo: partes vazias/gigantes e sujeitos que são a própria assistente.
+    """
+    triples = []
+    for line in (raw or "").splitlines():
+        line = line.strip().lstrip("-•* ").strip()
+        if line.upper().startswith("NENHUM") or "|" not in line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) != 3 or not all(parts):
+            continue
+        efrom, rel, eto = parts
+        if len(efrom) > 60 or len(rel) > 40 or len(eto) > 60:
+            continue
+        if efrom.lower() in _KG_BLOCKED_SUBJECTS:
+            continue
+        triples.append((efrom, rel, eto))
+    return triples
+
+
 _OPEN_TAGS  = ("<thought>", "<thinking>", "<think>", "<scratchpad>", "<reflection>")
 _CLOSE_TAGS = ("</thought>", "</thinking>", "</think>", "</scratchpad>", "</reflection>")
 
@@ -1206,37 +1254,28 @@ class Orchestrator:
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """
         Background task: extrai fatos sobre o usuário do último par de mensagens.
-        Usa o modelo principal (gemma3) — não precisa de JSON estruturado.
+        Formato de LINHAS (não JSON): fatos contêm aspas/vírgulas naturais que
+        quebravam o json.loads ("Expecting ',' delimiter").
         """
         prompt = (
             "Analise esta conversa e extraia fatos concretos e PERMANENTES sobre o USUÁRIO "
-            "(não sobre a IA). Retorne APENAS um JSON com lista de fatos objetivos.\n"
-            "Se não houver fatos relevantes, retorne {\"fatos\": []}.\n"
+            "(não sobre a IA).\n"
+            "Formato: UM fato por linha, começando com '- '. Sem JSON, sem aspas, sem numeração.\n"
+            "Se não houver fatos relevantes, responda apenas: NENHUM\n"
             "Exemplos BONS: nome, profissão, cidade, hobby específico, preferência clara.\n"
             "NÃO extraia: hora, data, dia da semana, clima, valores numéricos temporários, "
-            "ações da conversa, perguntas feitas. Só inclua fatos que ainda serão verdade daqui a 6 meses.\n"
-            "NÃO inclua suposições nem fatos sobre a conversa em si.\n\n"
-            f"Usuário: {user_msg}\n"
-            f"Assistente: {assistant_msg}\n\n"
-            "JSON:"
+            "ações da conversa, perguntas feitas. Só fatos que ainda serão verdade daqui a 6 meses.\n\n"
+            f"Usuário: {user_msg[:500]}\n"
+            f"Assistente: {assistant_msg[:500]}"
         )
         try:
-            messages = [{"role": "user", "content": prompt}]
-            raw = ""
-            async for token in self._stream_ollama(messages):
-                raw += token
-                if len(raw) > 1000:
-                    break
-
-            match = re.search(r'\{.*?\}', raw, re.DOTALL)
-            if not match:
-                return
-            data = json.loads(match.group())
-            for fact in data.get("fatos", []):
-                fact = fact.strip()
-                if fact and len(fact) > 8:
-                    self.memory.save_fact(user_id, fact)
-                    print(f"[KRIRK] Fato extraído: {fact}")
+            raw = await self.router.complete(
+                "tools", [{"role": "user", "content": prompt}],
+                temperature=0.1, max_tokens=300,
+            )
+            for fact in _parse_fact_lines(raw):
+                self.memory.save_fact(user_id, fact)
+                print(f"[KRIRK] Fato extraído: {fact}")
         except Exception as e:
             print(f"[KRIRK] extract_facts_bg falhou: {e}")
 
@@ -1300,55 +1339,32 @@ class Orchestrator:
         Persiste no KnowledgeGraphManager (SQLite) sem duplicatas.
         """
         prompt = (
-            "Analise a conversa e extraia entidades e relações concretas "
-            "APENAS sobre o USUÁRIO ou coisas que ele possui, usa, criou ou está envolvido.\n"
-            "Retorne SOMENTE JSON válido no formato:\n"
-            '{"entities": [{"name": "...", "type": "pessoa|projeto|tecnologia|lugar|conceito"}], '
-            '"relations": [{"from": "...", "relation": "...", "to": "..."}]}\n\n'
+            "Analise a conversa e extraia relações concretas APENAS sobre o USUÁRIO "
+            "ou coisas que ele possui, usa, criou ou está envolvido.\n"
+            "Formato: UMA relação por linha, exatamente assim (sem JSON):\n"
+            "entidade | relacao | entidade\n"
+            "Exemplo:\n"
+            "Erik | trabalha_em | site do salão\n"
+            "Erik | gosta_de | Minecraft\n"
+            "Se nada relevante, responda apenas: NENHUM\n\n"
             "Regras:\n"
-            "- Verbos de relação curtos e objetivos: usa, criou, trabalha_em, mora_em, "
-            "gosta_de, estuda, tem, conhece\n"
+            "- Verbos curtos: usa, criou, trabalha_em, mora_em, gosta_de, estuda, tem, conhece\n"
             "- Apenas fatos PERMANENTES (ainda verdadeiros em 6 meses)\n"
-            "- Entidades específicas e nomeadas (não genéricas como 'linguagem', 'ferramenta')\n"
-            "- Se nada relevante encontrado: {\"entities\": [], \"relations\": []}\n\n"
-            f"User: {user_msg}\n"
-            f"Assistant: {asst_msg}\n\n"
-            "JSON:"
+            "- NUNCA relações sobre a assistente/IA — só sobre o usuário\n"
+            "- Entidades específicas e nomeadas (não genéricas)\n\n"
+            f"User: {user_msg[:500]}\n"
+            f"Assistant: {asst_msg[:500]}"
         )
         try:
-            raw = ""
-            async for token in self._stream_ollama_tool([{"role": "user", "content": prompt}]):
-                raw += token
-                if len(raw) > 1000:
-                    break
-
-            raw = raw.strip()
-            if not raw:
-                return
-
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
-            if not match:
-                return
-
-            data = json.loads(match.group())
-
-            # Persiste entidades
-            for entity in data.get("entities", []):
-                name = str(entity.get("name", "")).strip()
-                etype = str(entity.get("type", "conceito")).strip()
-                if name and len(name) > 1:
-                    self.memory.kg.upsert_entity(user_id, name, etype)
-
-            # Persiste relações (também garante que as entidades existam)
-            for rel in data.get("relations", []):
-                efrom = str(rel.get("from", "")).strip()
-                relation = str(rel.get("relation", "")).strip()
-                eto = str(rel.get("to", "")).strip()
-                if efrom and relation and eto:
-                    self.memory.kg.upsert_entity(user_id, efrom, "conceito")
-                    self.memory.kg.upsert_entity(user_id, eto, "conceito")
-                    self.memory.kg.upsert_relation(user_id, efrom, relation, eto)
-                    print(f"[KG] {efrom} → {relation} → {eto}")
+            raw = await self.router.complete(
+                "tools", [{"role": "user", "content": prompt}],
+                temperature=0.1, max_tokens=300,
+            )
+            for efrom, relation, eto in _parse_kg_lines(raw):
+                self.memory.kg.upsert_entity(user_id, efrom, "conceito")
+                self.memory.kg.upsert_entity(user_id, eto, "conceito")
+                self.memory.kg.upsert_relation(user_id, efrom, relation, eto)
+                print(f"[KG] {efrom} → {relation} → {eto}")
 
         except Exception as e:
             print(f"[KG] extract_kg_bg falhou: {e}")

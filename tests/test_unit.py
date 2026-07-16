@@ -836,6 +836,48 @@ check("pergunta factual NAO e small-talk", not _is_smalltalk("qual a capital da 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 19. Parsers de extração em background (formato de linhas, à prova de aspas)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("19. Parsers de extracao (fatos e KG)")
+
+from backend.core.orchestrator import _parse_fact_lines, _parse_kg_lines
+
+raw_facts = '''Aqui estão os fatos:
+- o usuário disse "beleza então" e gosta de café
+- trabalha no site do salão da mãe
+* usa o Firefox como navegador
+- oi
+texto solto que não é fato'''
+facts = _parse_fact_lines(raw_facts)
+check("fatos com aspas internas nao quebram", len(facts) == 3)
+check("preserva aspas no conteudo", any('"beleza então"' in f for f in facts))
+check("ignora linha curta demais ('oi')", not any(f == "oi" for f in facts))
+check("ignora texto sem prefixo de lista", not any("texto solto" in f for f in facts))
+check("NENHUM retorna vazio", _parse_fact_lines("NENHUM") == [])
+check("nenhum minusculo tambem", _parse_fact_lines("nenhum fato relevante") == [])
+check("vazio retorna vazio", _parse_fact_lines("") == [])
+
+raw_kg = '''Erik | trabalha_em | site do salão
+Erik | gosta_de | Minecraft
+Assistant | usa | Firefox
+Krirk | conhece | Erik
+- Erik | mora_em | Cariacica
+entidade sem pipes
+a | b
+x | | y
+NENHUM'''
+triples = _parse_kg_lines(raw_kg)
+check("3 triplas validas extraidas", len(triples) == 3, f"got={triples}")
+check("tripla com espacos ok", ("Erik", "trabalha_em", "site do salão") in triples)
+check("prefixo de lista removido", ("Erik", "mora_em", "Cariacica") in triples)
+check("FILTRA sujeito Assistant", not any(t[0] == "Assistant" for t in triples))
+check("FILTRA sujeito Krirk", not any(t[0] == "Krirk" for t in triples))
+check("ignora linha sem 3 partes", not any(t[0] == "a" for t in triples))
+check("KG vazio para NENHUM", _parse_kg_lines("NENHUM") == [])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 
