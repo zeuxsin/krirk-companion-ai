@@ -60,15 +60,28 @@ class ProactiveMonitor:
     # ── API pública ───────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Inicia o loop de monitoramento como asyncio.Task (não bloqueia)."""
-        if not self._enabled:
-            print("[KRIRK][proactive] Monitor desativado (config proactive.enabled=false)")
+        """
+        Inicia o loop como asyncio.Task (não bloqueia).
+        O loop hospeda DOIS sistemas independentes:
+          • comentários proativos (tela/Spotify) — controlados por self._enabled
+          • reflexão autônoma (sonho/pesquisa)  — controlada por reflection.enabled
+        O loop só deixa de iniciar se AMBOS estiverem desativados.
+        """
+        reflection_on = bool(self._reflection and self._reflection_enabled)
+        if not self._enabled and not reflection_on:
+            print("[KRIRK][proactive] Proativo e reflexão desativados — loop não iniciado")
             return
+
         asyncio.create_task(self._loop())
-        print(
-            f"[KRIRK][proactive] Monitor iniciado — "
-            f"intervalo={self._check_interval}s, cooldown={self._cooldown}s"
-        )
+        parts = []
+        if self._enabled:
+            parts.append(f"proativo (intervalo={self._check_interval}s)")
+        if reflection_on:
+            parts.append(
+                f"reflexão (sonho {self._dream_every / 3600:.0f}h, "
+                f"pesquisa {self._research_every / 3600:.0f}h)"
+            )
+        print(f"[KRIRK][proactive] Loop iniciado — {' + '.join(parts)}")
 
     def set_enabled(self, value: bool) -> None:
         """Liga/desliga o monitor proativo em runtime."""
@@ -164,14 +177,16 @@ class ProactiveMonitor:
         return await self._call_llm_text(prompt)
 
     async def _tick(self) -> None:
-        # Respeita o toggle de runtime — desativado pelo usuário nas Configurações
-        if not self._enabled:
-            return
-
         now = time.monotonic()
 
-        # 0. Reflexão autônoma (sonho/pesquisa/nota) — gate próprio
+        # 0. Reflexão autônoma (sonho/pesquisa/nota) — INDEPENDENTE do toggle
+        #    de comentários proativos; tem gates próprios (enabled/idle/cooldown)
         if await self._run_reflection(now):
+            return
+
+        # Daqui para baixo: comentários proativos de tela/Spotify —
+        # respeitam o toggle de runtime das Configurações
+        if not self._enabled:
             return
 
         # 1. Verifica cooldown global

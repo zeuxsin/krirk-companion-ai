@@ -149,6 +149,14 @@ def create_app() -> FastAPI:
         orchestrator.memory.delete_fact(user_id, body["fact"])
         return {"ok": True}
 
+    @app.delete("/api/memory/term")
+    async def delete_term(request: Request):
+        """Remove um bordão do léxico (curadoria)."""
+        body = await request.json()
+        user_id = body.get("user_id", "default")
+        ok = orchestrator.memory.delete_term(user_id, body["term"])
+        return {"ok": ok}
+
     @app.delete("/api/memory/kg-relation")
     async def delete_kg_relation(request: Request):
         body = await request.json()
@@ -262,6 +270,7 @@ def create_app() -> FastAPI:
             "proactive_enabled": proactive_monitor._enabled,
             "krirk_name":        orchestrator.personality.name,
             "personality_notes": orchestrator.personality.personality_notes,
+            "brain_state":       orchestrator._brain_state,
         }
 
     @app.post("/api/settings")

@@ -602,6 +602,10 @@ try:
     mmA.touch_term(U, "farmar aura de neandertal")
     full = mmA.get_lexicon_full(U)
     check("touch_term incrementa usage", full[0]["usage_count"] >= 1)
+    mmA.add_term(U, "bordao temporario", "teste de exclusao")
+    check("delete_term remove (normalizado)", mmA.delete_term(U, "Bordão TEMPORARIO!") is True)
+    check("delete_term inexistente -> False", mmA.delete_term(U, "nao existe") is False)
+    check("lexicon preserva o outro termo", len(mmA.get_lexicon(U)) == 1)
 
     # Reflexões
     mmA.add_reflection(U, "o usuario anda jogando muito terror", category="insight")

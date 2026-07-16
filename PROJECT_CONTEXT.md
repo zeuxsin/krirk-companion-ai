@@ -247,6 +247,12 @@ Armazéns em `memory_manager.py`: `lexicon`, `reflections`, `diary`,
   bordões + entrada de sonho; `research()` pesquisa um tópico e guarda nota de
   aprendizado. Agendados pelo `ProactiveMonitor` (timestamps em
   `data/reflection_state.json`; dream 3h, research 6h). Modo ativo puxa assunto.
+  IMPORTANTE: o loop do ProactiveMonitor inicia se proativo OU reflexão estiverem
+  habilitados; o toggle proativo das Configurações controla SÓ tela/Spotify —
+  a reflexão roda independente (desacoplado em 2026-07-16).
+- **UI Vida Interior**: aba 💭 na SettingsPage — brain-state, kernel (propor/
+  ativar/rollback), bordões (excluir via DELETE /api/memory/term), reflexões
+  ("Refletir agora"), diário e propostas pendentes (aprovar/recusar).
 - **Sublation** (`orchestrator.propose_sublation`): cura fatos redundantes/
   conflitantes com temporalidade. Pré-colapsa dupes exatas, envia ≤40 ao LLM,
   preserva os não-enviados. Encena como proposta.

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
-type SettingsTab = 'models' | 'personality' | 'memory' | 'appearance' | 'hardware'
+type SettingsTab = 'models' | 'personality' | 'memory' | 'interior' | 'appearance' | 'hardware'
 
 // ── Tipos de memória ──────────────────────────────────────────────────────────
 
@@ -772,12 +772,249 @@ function AppearanceTab() {
   )
 }
 
+// ── Aba Vida Interior — diário, reflexões, bordões, kernel, brain-state ──────
+
+interface LexiconTerm { term: string; meaning: string; usage_count: number; pinned: number }
+interface DiaryEntry { content: string; mood: string; created_at: string }
+interface Reflection { content: string; category: string; created_at: string }
+interface KernelVersion { id: number; note: string; active: number; created_at: string }
+interface PendingProposal { id: number; kind: string; rationale: string; tier: number }
+
+const BRAIN_MODES = [
+  { id: 'focused',  label: '🎯 Focada',   desc: 'precisa e direta' },
+  { id: 'chill',    label: '😌 Tranquila', desc: 'equilibrada (padrão)' },
+  { id: 'creative', label: '🎨 Criativa',  desc: 'solta e inventiva' },
+  { id: 'chaos',    label: '🌀 Caos',      desc: 'imprevisível' },
+]
+
+const KIND_DESC: Record<string, string> = {
+  sublation: 'reorganizar as próprias memórias',
+  kernel: 'reescrever a própria identidade',
+  wipe_memory: 'apagar toda a memória',
+}
+
+function InteriorTab() {
+  const [lexicon, setLexicon] = useState<LexiconTerm[]>([])
+  const [diary, setDiary] = useState<DiaryEntry[]>([])
+  const [reflections, setReflections] = useState<Reflection[]>([])
+  const [kernelActive, setKernelActive] = useState<string | null>(null)
+  const [kernelVersions, setKernelVersions] = useState<KernelVersion[]>([])
+  const [proposals, setProposals] = useState<PendingProposal[]>([])
+  const [brainState, setBrainState] = useState<string>('chill')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const [mem, kernel, props, settings] = await Promise.all([
+        fetch(`${API}/api/memory`).then(r => r.json()),
+        fetch(`${API}/api/kernel`).then(r => r.json()),
+        fetch(`${API}/api/proposals`).then(r => r.json()),
+        fetch(`${API}/api/settings`).then(r => r.json()),
+      ])
+      setLexicon(mem.lexicon ?? [])
+      setDiary((mem.diary ?? []).slice().reverse())   // mais recente primeiro
+      setReflections(mem.reflections ?? [])
+      setKernelActive(kernel.active)
+      setKernelVersions(kernel.versions ?? [])
+      setProposals(props.proposals ?? [])
+      setBrainState(settings.brain_state ?? 'chill')
+      setError(false)
+    } catch { setError(true) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const setBrain = async (mode: string) => {
+    setBrainState(mode)
+    try {
+      await fetch(`${API}/api/brain_state`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+    } catch { /* offline */ }
+  }
+
+  const deleteTerm = async (term: string) => {
+    await fetch(`${API}/api/memory/term`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term }),
+    })
+    load()
+  }
+
+  const respondProposal = async (id: number, approve: boolean) => {
+    await fetch(`${API}/api/proposals/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST' })
+    load()
+  }
+
+  const proposeKernel = async () => {
+    setBusy('kernel')
+    try { await fetch(`${API}/api/kernel/propose`, { method: 'POST' }) } catch { /* offline */ }
+    setBusy(null)
+    load()
+  }
+
+  const rollbackKernel = async (kernelId: number) => {
+    await fetch(`${API}/api/kernel/rollback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kernel_id: kernelId }),
+    })
+    load()
+  }
+
+  const forceDream = async () => {
+    setBusy('dream')
+    try { await fetch(`${API}/api/reflection/dream`, { method: 'POST' }) } catch { /* offline */ }
+    setBusy(null)
+    load()
+  }
+
+  const fmtDate = (iso: string) => {
+    try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+    catch { return iso }
+  }
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--color-krirk-surface)', borderRadius: 8,
+    padding: '8px 10px', border: '1px solid var(--color-krirk-border)',
+    fontSize: 11, marginBottom: 6, lineHeight: 1.5,
+  }
+  const smallBtn: React.CSSProperties = {
+    padding: '3px 10px', borderRadius: 5, border: 'none', cursor: 'pointer',
+    fontSize: 10, fontWeight: 600, background: 'rgba(124,58,237,0.25)', color: '#a78bfa',
+  }
+
+  if (loading) return <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 16 }}>Carregando vida interior…</div>
+  if (error) return <div style={{ fontSize: 12, color: 'var(--color-krirk-muted)', padding: 12 }}>⚠️ Backend offline — inicie o servidor Python</div>
+
+  return (
+    <div>
+      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--color-krirk-text)' }}>
+        Vida Interior
+      </h3>
+      <p style={{ fontSize: 10, color: 'var(--color-krirk-muted)', marginBottom: 12 }}>
+        O que a Krirk pensa, sonha e aprende por conta própria.
+      </p>
+
+      {/* ── Propostas pendentes ── */}
+      {proposals.length > 0 && (
+        <>
+          <SectionHeader title="⚖️ Aguardando sua aprovação" count={proposals.length} />
+          {proposals.map(p => (
+            <div key={p.id} style={{ ...cardStyle, border: '1px solid #7c3aed' }}>
+              <div style={{ fontWeight: 700, color: '#a78bfa', marginBottom: 3 }}>
+                Ela quer {KIND_DESC[p.kind] ?? p.kind}
+              </div>
+              <div style={{ color: 'var(--color-krirk-muted)', marginBottom: 6 }}>{p.rationale}</div>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => respondProposal(p.id, false)} style={{ ...smallBtn, background: 'transparent', color: 'rgba(255,255,255,0.5)' }}>Recusar</button>
+                <button onClick={() => respondProposal(p.id, true)} style={{ ...smallBtn, background: '#7c3aed', color: '#fff' }}>Aprovar</button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* ── Brain-state ── */}
+      <SectionHeader title="🧠 Estado mental (geração)" />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        {BRAIN_MODES.map(m => (
+          <button key={m.id} onClick={() => setBrain(m.id)} style={{
+            padding: '8px 10px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+            border: brainState === m.id ? '1px solid #7c3aed' : '1px solid var(--color-krirk-border)',
+            background: brainState === m.id ? 'rgba(124,58,237,0.15)' : 'var(--color-krirk-surface)',
+            color: 'var(--color-krirk-text)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 600 }}>{m.label}</div>
+            <div style={{ fontSize: 9, color: 'var(--color-krirk-muted)' }}>{m.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Identidade (kernel) ── */}
+      <SectionHeader title="🪞 Identidade (kernel)" />
+      <div style={cardStyle}>
+        {kernelActive ? (
+          <div style={{ fontStyle: 'italic', color: 'var(--color-krirk-text)' }}>{kernelActive}</div>
+        ) : (
+          <div style={{ color: 'var(--color-krirk-muted)' }}>Persona padrão (nenhum kernel auto-autorado ativo)</div>
+        )}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, justifyContent: 'flex-end' }}>
+          {kernelActive && (
+            <button onClick={() => rollbackKernel(0)} style={{ ...smallBtn, background: 'transparent', color: 'rgba(255,255,255,0.5)' }}>
+              Voltar ao padrão
+            </button>
+          )}
+          <button onClick={proposeKernel} disabled={busy === 'kernel'} style={smallBtn}>
+            {busy === 'kernel' ? 'Redigindo…' : 'Pedir para ela redigir um novo'}
+          </button>
+        </div>
+      </div>
+      {kernelVersions.length > 0 && kernelVersions.map(k => (
+        <div key={k.id} style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1, color: 'var(--color-krirk-muted)' }}>
+            v{k.id} · {fmtDate(k.created_at)} {k.active ? '· ATIVA' : ''} {k.note ? `· ${k.note.slice(0, 60)}` : ''}
+          </span>
+          {!k.active && <button onClick={() => rollbackKernel(k.id)} style={smallBtn}>Ativar</button>}
+        </div>
+      ))}
+
+      {/* ── Bordões / memes internos ── */}
+      <SectionHeader title="😂 Bordões de vocês" count={lexicon.length} />
+      {lexicon.length === 0 && <div style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhum ainda — diga "esse é nosso bordão: ..." no chat.</div>}
+      {lexicon.map(t => (
+        <div key={t.term} style={{ ...cardStyle, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 700, color: '#a78bfa' }}>"{t.term}"</span>
+            {t.pinned ? <span style={{ fontSize: 9, marginLeft: 6 }}>📌</span> : null}
+            <span style={{ fontSize: 9, color: 'var(--color-krirk-muted)', marginLeft: 6 }}>usado {t.usage_count}×</span>
+            <div style={{ color: 'var(--color-krirk-muted)', marginTop: 2 }}>{t.meaning}</div>
+          </div>
+          <button onClick={() => deleteTerm(t.term)} title="Esquecer este bordão"
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 12 }}>✕</button>
+        </div>
+      ))}
+
+      {/* ── Reflexões ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <SectionHeader title="💡 O que ela percebe sobre você" count={reflections.length} />
+        <button onClick={forceDream} disabled={busy === 'dream'} style={{ ...smallBtn, marginTop: 12 }}>
+          {busy === 'dream' ? 'Sonhando…' : 'Refletir agora'}
+        </button>
+      </div>
+      {reflections.length === 0 && <div style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhuma reflexão ainda.</div>}
+      {reflections.map((r, i) => (
+        <div key={i} style={cardStyle}>
+          <span style={{ fontSize: 9, color: r.category === 'humor' ? '#fbbf24' : '#38bdf8', textTransform: 'uppercase', fontWeight: 700 }}>{r.category}</span>
+          <div style={{ marginTop: 2 }}>{r.content}</div>
+        </div>
+      ))}
+
+      {/* ── Diário ── */}
+      <SectionHeader title="📓 Diário dela" count={diary.length} />
+      {diary.length === 0 && <div style={{ fontSize: 11, color: 'var(--color-krirk-muted)' }}>Nenhuma entrada ainda.</div>}
+      {diary.map((d, i) => (
+        <div key={i} style={{ ...cardStyle, fontStyle: 'italic' }}>
+          <div style={{ fontSize: 9, color: 'var(--color-krirk-muted)', marginBottom: 3, fontStyle: 'normal' }}>
+            {fmtDate(d.created_at)} · sentindo-se {d.mood}
+          </div>
+          {d.content}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Shell principal ───────────────────────────────────────────────────────────
 
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: 'models',      label: 'Modelos',       icon: '🤖' },
   { id: 'personality', label: 'Personalidade', icon: '✨' },
   { id: 'memory',      label: 'Memória',       icon: '🧠' },
+  { id: 'interior',    label: 'Vida Interior', icon: '💭' },
   { id: 'appearance',  label: 'Aparência',     icon: '🎨' },
   { id: 'hardware',    label: 'Hardware',      icon: '💻' },
 ]
@@ -831,6 +1068,7 @@ export function SettingsPage() {
         {tab === 'models'      && <ModelsTab />}
         {tab === 'personality' && <PersonalityTab />}
         {tab === 'memory'      && <MemoryTab />}
+        {tab === 'interior'    && <InteriorTab />}
         {tab === 'appearance'  && <AppearanceTab />}
         {tab === 'hardware'    && <HardwareTab />}
       </main>

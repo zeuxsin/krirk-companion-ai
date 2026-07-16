@@ -471,6 +471,16 @@ class MemoryManager:
                     )
                     return
 
+    def delete_term(self, user_id: str, term: str) -> bool:
+        """Remove um bordão do léxico (curadoria pelo usuário). True se removeu."""
+        norm = _normalize_fact(term)
+        with self._conn() as conn:
+            for r in conn.execute("SELECT id, term FROM lexicon WHERE user_id = ?", (user_id,)).fetchall():
+                if _normalize_fact(r["term"]) == norm:
+                    conn.execute("DELETE FROM lexicon WHERE id=?", (r["id"],))
+                    return True
+        return False
+
     # ── Reflexões / insights ──────────────────────────────────────────────────
 
     def add_reflection(self, user_id: str, content: str,
