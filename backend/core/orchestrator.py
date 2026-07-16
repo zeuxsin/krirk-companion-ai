@@ -16,6 +16,20 @@ def _strip_reasoning(text: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', cleaned).strip()
 
 
+# Marcadores de riso/aprovação — sinal de que a última troca teve graça
+_AMUSEMENT_MARKERS = (
+    "kkk", "kkkk", "rsrs", "haha", "hehe", "auhu", "ashsh", "kajs",
+    "genial", "morri", "pqp", "mano do céu", "muito bom", "hilário",
+    "hilario", "não aguento", "nao aguento", "😂", "🤣", "😹", "kkkkk",
+)
+
+
+def _detect_amusement(text: str) -> bool:
+    """True se o texto do usuário indica riso/diversão (para a reflexão priorizar humor)."""
+    low = text.lower()
+    return any(m in low for m in _AMUSEMENT_MARKERS)
+
+
 _OPEN_TAGS  = ("<thought>", "<thinking>", "<think>", "<scratchpad>", "<reflection>")
 _CLOSE_TAGS = ("</thought>", "</thinking>", "</think>", "</scratchpad>", "</reflection>")
 
@@ -110,6 +124,9 @@ class Orchestrator:
         self.emotion = EmotionEngine(self.personality.get_initial_emotion())
         self.tts = TTSEngine(config["tts"])
         self.stt = STTEngine(config["stt"])
+
+        # ── Brain-state (Fase D) — humor de geração controlável pela Krirk ───
+        self._brain_state = "chill"   # focused | chill | creative | chaos
 
         # ── Provider router (NVIDIA → Google → Cerebras → Ollama) ────────────
         self.router: ProviderRouter = build_router(config)
@@ -275,6 +292,9 @@ class Orchestrator:
             "days_back = how many days back to search.\n"
             "- remember_this: ONLY when the user EXPLICITLY asks to remember/save something "
             "('lembra disso', 'anota que...', 'não esquece que...'). Pass the fact as param.\n"
+            "- coin_term: when the user establishes an inside joke/slang ('esse é nosso bordão', "
+            "'de agora em diante X quer dizer Y') or officializes a recurring joke.\n"
+            "- search_meme: when the user asks the meaning/origin of a meme or slang term.\n"
             "- Use the EXACT tool name as listed above. Do not translate to Portuguese.\n"
             "- For run_powershell, write a complete PowerShell command.\n"
             "- For list_directory and read_file, use the full absolute path.\n"
@@ -464,6 +484,14 @@ class Orchestrator:
             max_rel = kg_cfg.get("max_relations_in_prompt", 25)
             kg_text = self.memory.kg.to_prompt_text(user_id, max_relations=max_rel)
 
+        # ── Camada de interioridade — léxico, reflexões, diário ──────────────
+        lexicon = self.memory.get_lexicon(user_id)
+        insights = self.memory.get_reflections(
+            user_id, limit=self._config.get("reflection", {}).get("max_insights_in_prompt", 5)
+        )
+        recent_diary = self.memory.get_recent_diary(user_id, limit=3)
+        persona_kernel = self.memory.get_active_kernel()
+
         system_prompt = self.personality.build_system_prompt(
             current_emotion=self.emotion.current_emotion,
             user_profile=profile_text,
@@ -471,6 +499,11 @@ class Orchestrator:
             semantic_memories=semantic_memories if semantic_memories else None,
             knowledge_graph=kg_text,
             conversation_summary=conv_summary,
+            lexicon=lexicon if lexicon else None,
+            insights=insights if insights else None,
+            recent_diary=recent_diary if recent_diary else None,
+            persona_kernel=persona_kernel,
+            brain_state=self._brain_state_label(),
         )
 
         llm_messages = [{"role": "system", "content": system_prompt}]
@@ -553,10 +586,18 @@ class Orchestrator:
         self.memory.save_message(user_id, "assistant", clean_response, emotion=new_emotion)
         self.memory.update_intimacy(user_id, 0.1)
 
+        # Reforça bordões que a Krirk realmente reusou na resposta
+        low_resp = clean_response.lower()
+        for t in lexicon:
+            if t["term"].lower() in low_resp:
+                self.memory.touch_term(user_id, t["term"])
+
         # Background tasks — executam em paralelo sem bloquear a resposta
+        amused = _detect_amusement(message)
         asyncio.create_task(self.extract_facts_bg(message, clean_response, user_id))
         asyncio.create_task(self.update_profile_bg(message, clean_response, user_id))
         asyncio.create_task(self.extract_kg_bg(message, clean_response, user_id))
+        asyncio.create_task(self.write_diary_bg(message, clean_response, user_id, amused))
 
         audio_b64 = await self.tts.generate(clean_response)
 
@@ -910,6 +951,66 @@ class Orchestrator:
         merged = len(non_pinned) - len(new_facts)
         print(f"[KRIRK][memory] Consolidação: {len(non_pinned)} → {len(new_facts)} fatos")
         return {"before": len(non_pinned), "after": len(new_facts), "merged": merged}
+
+    # ── Brain-state (Fase D) ──────────────────────────────────────────────────
+
+    BRAIN_STATES: dict[str, dict[str, float]] = {
+        "focused":  {"temperature": 0.3, "top_p": 0.80},
+        "chill":    {"temperature": 0.7, "top_p": 0.90},
+        "creative": {"temperature": 1.0, "top_p": 0.95},
+        "chaos":    {"temperature": 1.3, "top_p": 0.98},
+    }
+
+    def set_brain_state(self, mode: str) -> bool:
+        if mode not in self.BRAIN_STATES:
+            return False
+        self._brain_state = mode
+        return True
+
+    def _brain_state_label(self) -> str:
+        labels = {"focused": "focada e precisa", "chill": "tranquila",
+                  "creative": "criativa e solta", "chaos": "caótica e imprevisível"}
+        return labels.get(self._brain_state, "tranquila")
+
+    def _gen_params(self) -> dict[str, float]:
+        return self.BRAIN_STATES.get(self._brain_state, self.BRAIN_STATES["chill"])
+
+    # ── Diário autônomo (Fase A) ──────────────────────────────────────────────
+
+    async def write_diary_bg(self, user_msg: str, assistant_msg: str,
+                             user_id: str, amused: bool = False) -> None:
+        """
+        Escreve uma entrada curta de diário em 1ª pessoa sobre a última troca.
+        Só registra trocas com substância (evita 'oi'/'ok' virarem diário).
+        """
+        if len(user_msg) + len(assistant_msg) < 60:
+            return
+        mood_hint = " O usuário achou algo engraçado nesta troca." if amused else ""
+        prompt = (
+            "Você é a Krirk, uma companion AI. Escreva UMA entrada curta de diário "
+            "em primeira pessoa (máx 2 frases, português), sobre a troca abaixo — "
+            "o que você sentiu, achou ou quer lembrar. Íntimo e natural, sem clichês."
+            f"{mood_hint}\n\n"
+            f"Usuário: {user_msg[:400]}\n"
+            f"Você respondeu: {assistant_msg[:400]}\n\n"
+            'Responda APENAS com JSON: {"entrada": "...", "humor": "uma palavra"}'
+        )
+        try:
+            raw = await self.router.complete(
+                "tools", [{"role": "user", "content": prompt}],
+                temperature=0.8, max_tokens=200,
+            )
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if not match:
+                return
+            data = json.loads(match.group())
+            entrada = str(data.get("entrada", "")).strip()
+            humor = str(data.get("humor", "neutro")).strip()[:20] or "neutro"
+            if entrada:
+                self.memory.add_diary_entry(user_id, entrada, mood=humor)
+                print(f"[KRIRK][diário] ({humor}) {entrada[:80]}")
+        except Exception as e:
+            print(f"[KRIRK][diário] write_diary_bg falhou: {e}")
 
     async def extract_facts_bg(self, user_msg: str, assistant_msg: str, user_id: str) -> None:
         """

@@ -110,8 +110,68 @@ class MemoryManager:
                     updated_at       TEXT NOT NULL
                 );
 
+                -- ── Interioridade escafoldada ──────────────────────────────
+                CREATE TABLE IF NOT EXISTS lexicon (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    term TEXT NOT NULL,
+                    meaning TEXT NOT NULL,
+                    origin TEXT,
+                    usage_count INTEGER DEFAULT 0,
+                    pinned INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    last_used TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS reflections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    category TEXT DEFAULT 'insight',
+                    content TEXT NOT NULL,
+                    salience REAL DEFAULT 1.0,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS diary (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    mood TEXT DEFAULT 'neutro',
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS learning_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    source TEXT,
+                    shared INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS kernel_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    note TEXT,
+                    active INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS pending_proposals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    rationale TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
                 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
+                CREATE INDEX IF NOT EXISTS idx_lexicon_user ON lexicon(user_id);
+                CREATE INDEX IF NOT EXISTS idx_reflections_user ON reflections(user_id);
+                CREATE INDEX IF NOT EXISTS idx_diary_user ON diary(user_id);
             """)
             # Migrations: adicionam colunas se não existirem (banco legado)
             cols = [r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()]
@@ -348,6 +408,220 @@ class MemoryManager:
         with self._conn() as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Léxico (bordões / gírias / piadas internas) ───────────────────────────
+
+    def add_term(self, user_id: str, term: str, meaning: str,
+                 origin: str = "", pinned: bool = False) -> bool:
+        """Adiciona um bordão ao léxico. Dedupe por termo normalizado (reforça uso)."""
+        term = term.strip()
+        meaning = meaning.strip()
+        if not term or not meaning:
+            return False
+        now = datetime.now().isoformat()
+        norm = _normalize_fact(term)
+        with self._conn() as conn:
+            for r in conn.execute("SELECT id, term FROM lexicon WHERE user_id = ?", (user_id,)).fetchall():
+                if _normalize_fact(r["term"]) == norm:
+                    conn.execute(
+                        "UPDATE lexicon SET meaning=?, usage_count=usage_count+1, last_used=?, pinned=MAX(pinned,?) WHERE id=?",
+                        (meaning, now, int(pinned), r["id"])
+                    )
+                    return False
+            conn.execute(
+                """INSERT INTO lexicon (user_id, term, meaning, origin, usage_count, pinned, created_at, last_used)
+                   VALUES (?,?,?,?,0,?,?,?)""",
+                (user_id, term, meaning, origin, int(pinned), now, now)
+            )
+        if self._vectors:
+            self._vectors.add(f"term-{user_id}-{uuid.uuid4().hex[:12]}",
+                              f"{term}: {meaning}",
+                              {"user_id": user_id, "type": "lexicon"})
+        return True
+
+    def get_lexicon(self, user_id: str, limit: int = 20) -> list[dict]:
+        """Bordões para injetar no prompt — fixados e mais usados primeiro."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT term, meaning FROM lexicon WHERE user_id = ?
+                   ORDER BY pinned DESC, usage_count DESC, last_used DESC LIMIT ?""",
+                (user_id, limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_lexicon_full(self, user_id: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT term, meaning, origin, usage_count, pinned, created_at, last_used "
+                "FROM lexicon WHERE user_id = ? ORDER BY pinned DESC, usage_count DESC",
+                (user_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def touch_term(self, user_id: str, term: str) -> None:
+        """Registra que um bordão foi usado (incrementa contador)."""
+        now = datetime.now().isoformat()
+        norm = _normalize_fact(term)
+        with self._conn() as conn:
+            for r in conn.execute("SELECT id, term FROM lexicon WHERE user_id = ?", (user_id,)).fetchall():
+                if _normalize_fact(r["term"]) == norm:
+                    conn.execute(
+                        "UPDATE lexicon SET usage_count=usage_count+1, last_used=? WHERE id=?",
+                        (now, r["id"])
+                    )
+                    return
+
+    # ── Reflexões / insights ──────────────────────────────────────────────────
+
+    def add_reflection(self, user_id: str, content: str,
+                       category: str = "insight", salience: float = 1.0) -> None:
+        content = content.strip()
+        if not content:
+            return
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO reflections (user_id, category, content, salience, created_at) VALUES (?,?,?,?,?)",
+                (user_id, category, content, salience, now)
+            )
+
+    def get_reflections(self, user_id: str, category: str | None = None,
+                        limit: int = 8) -> list[dict]:
+        """Reflexões ordenadas por saliência efetiva (com decay temporal)."""
+        now = datetime.now()
+        with self._conn() as conn:
+            if category:
+                rows = conn.execute(
+                    "SELECT content, category, salience, created_at FROM reflections WHERE user_id=? AND category=?",
+                    (user_id, category)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT content, category, salience, created_at FROM reflections WHERE user_id=?",
+                    (user_id,)
+                ).fetchall()
+        scored = []
+        for r in rows:
+            eff = _effective_confidence(r["salience"], r["created_at"], False, now)
+            scored.append((eff, dict(r)))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [d for _, d in scored[:limit]]
+
+    # ── Diário ────────────────────────────────────────────────────────────────
+
+    def add_diary_entry(self, user_id: str, content: str, mood: str = "neutro") -> None:
+        content = content.strip()
+        if not content:
+            return
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO diary (user_id, content, mood, created_at) VALUES (?,?,?,?)",
+                (user_id, content, mood, now)
+            )
+        if self._vectors:
+            self._vectors.add(f"diary-{user_id}-{uuid.uuid4().hex[:12]}", content,
+                              {"user_id": user_id, "type": "diary", "mood": mood})
+
+    def get_recent_diary(self, user_id: str, limit: int = 3) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT content, mood, created_at FROM diary WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    # ── Notas de aprendizado ──────────────────────────────────────────────────
+
+    def add_learning_note(self, user_id: str, topic: str, content: str, source: str = "") -> None:
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO learning_notes (user_id, topic, content, source, shared, created_at) VALUES (?,?,?,?,0,?)",
+                (user_id, topic.strip(), content.strip(), source, now)
+            )
+        if self._vectors:
+            self._vectors.add(f"note-{user_id}-{uuid.uuid4().hex[:12]}",
+                              f"{topic}: {content}",
+                              {"user_id": user_id, "type": "note"})
+
+    def get_unshared_notes(self, user_id: str, limit: int = 3) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, topic, content, source FROM learning_notes WHERE user_id=? AND shared=0 ORDER BY id ASC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_note_shared(self, note_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE learning_notes SET shared=1 WHERE id=?", (note_id,))
+
+    # ── Kernel versionado (identidade auto-autorada) ──────────────────────────
+
+    def save_kernel(self, content: str, note: str = "", activate: bool = False) -> int:
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            if activate:
+                conn.execute("UPDATE kernel_versions SET active=0")
+            cur = conn.execute(
+                "INSERT INTO kernel_versions (content, note, active, created_at) VALUES (?,?,?,?)",
+                (content.strip(), note, int(activate), now)
+            )
+            return cur.lastrowid
+
+    def get_active_kernel(self) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT content FROM kernel_versions WHERE active=1 ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        return row["content"] if row else None
+
+    def list_kernels(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, note, active, created_at FROM kernel_versions ORDER BY id DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def activate_kernel(self, kernel_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute("SELECT id FROM kernel_versions WHERE id=?", (kernel_id,)).fetchone()
+            if not row:
+                return False
+            conn.execute("UPDATE kernel_versions SET active=0")
+            conn.execute("UPDATE kernel_versions SET active=1 WHERE id=?", (kernel_id,))
+        return True
+
+    # ── Propostas pendentes (framework de consentimento) ──────────────────────
+
+    def add_proposal(self, kind: str, payload_json: str, rationale: str = "") -> int:
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO pending_proposals (kind, payload_json, rationale, status, created_at) VALUES (?,?,?, 'pending', ?)",
+                (kind, payload_json, rationale, now)
+            )
+            return cur.lastrowid
+
+    def get_pending_proposals(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, kind, payload_json, rationale, created_at FROM pending_proposals WHERE status='pending' ORDER BY id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_proposal(self, proposal_id: int) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, kind, payload_json, rationale, status FROM pending_proposals WHERE id=?",
+                (proposal_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_proposal_status(self, proposal_id: int, status: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE pending_proposals SET status=? WHERE id=?", (status, proposal_id))
 
     def search_semantic(self, user_id: str, query: str, n: int = 5) -> list[dict]:
         """Busca semântica nas memórias do usuário. Retorna [] se ChromaDB indisponível."""

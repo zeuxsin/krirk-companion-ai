@@ -139,6 +139,9 @@ tools:
     # ── Fase 5: memória de longo prazo ──
     - search_history   # busca conversas por período ("o que falamos semana passada")
     - remember_this    # memoriza permanentemente ("lembra disso")
+    # ── Interioridade: memes internos / cultura compartilhada ──
+    - coin_term        # cunha um bordão/gíria interno de vocês dois
+    - search_meme      # busca significado de meme/gíria na internet
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:

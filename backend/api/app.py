@@ -116,6 +116,9 @@ def create_app() -> FastAPI:
             "profile":      orchestrator.memory.get_profile(user_id),
             "facts":        orchestrator.memory.get_facts(user_id, limit=200),
             "kg_relations": orchestrator.memory.kg.get_relations(user_id, limit=500),
+            "lexicon":      orchestrator.memory.get_lexicon_full(user_id),
+            "diary":        orchestrator.memory.get_recent_diary(user_id, limit=20),
+            "reflections":  orchestrator.memory.get_reflections(user_id, limit=20),
         }
 
     @app.put("/api/memory/profile")

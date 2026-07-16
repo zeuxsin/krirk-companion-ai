@@ -576,6 +576,100 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 13. Interioridade Fase A — léxico, reflexões, diário, humor
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("13. Interioridade (Fase A)")
+
+from backend.core.orchestrator import _detect_amusement
+
+check("detecta riso 'kkkk'", _detect_amusement("kkkk isso foi muito bom"))
+check("detecta 'genial'", _detect_amusement("cara isso foi genial"))
+check("detecta 'morri'", _detect_amusement("MORRI com essa"))
+check("texto neutro nao e riso", not _detect_amusement("preciso terminar o relatorio hoje"))
+
+tmpA = Path(tempfile.mkdtemp(prefix="krirk_int_"))
+try:
+    mmA = MemoryManager(db_path=str(tmpA / "t.db"), chroma_path=str(tmpA / "c"))
+    mmA._vectors = None
+    U = "int-user"
+
+    # Léxico
+    check("add_term novo", mmA.add_term(U, "farmar aura de neandertal", "chamar de burro", pinned=True) is True)
+    check("add_term dedupe reforca", mmA.add_term(U, "Farmar AURA de Neandertal!", "idem") is False)
+    lex = mmA.get_lexicon(U)
+    check("lexicon tem 1 termo", len(lex) == 1 and lex[0]["term"].startswith("farmar"))
+    mmA.touch_term(U, "farmar aura de neandertal")
+    full = mmA.get_lexicon_full(U)
+    check("touch_term incrementa usage", full[0]["usage_count"] >= 1)
+
+    # Reflexões
+    mmA.add_reflection(U, "o usuario anda jogando muito terror", category="insight")
+    mmA.add_reflection(U, "humor sarcastico e referencias de games", category="humor")
+    check("get_reflections todas", len(mmA.get_reflections(U)) == 2)
+    check("get_reflections filtra categoria", len(mmA.get_reflections(U, category="humor")) == 1)
+
+    # Diário
+    mmA.add_diary_entry(U, "hoje ele me contou do projeto novo, fiquei animada", mood="empolgada")
+    mmA.add_diary_entry(U, "conversa tranquila sobre jogos", mood="tranquila")
+    diary = mmA.get_recent_diary(U, limit=5)
+    check("diario 2 entradas em ordem", len(diary) == 2 and "projeto novo" in diary[0]["content"])
+    check("diario guarda mood", diary[0]["mood"] == "empolgada")
+
+    # Notas de aprendizado
+    mmA.add_learning_note(U, "buracos negros", "eles evaporam via radiacao Hawking", source="wiki")
+    unshared = mmA.get_unshared_notes(U)
+    check("nota nao compartilhada aparece", len(unshared) == 1)
+    mmA.mark_note_shared(unshared[0]["id"])
+    check("nota compartilhada some da fila", mmA.get_unshared_notes(U) == [])
+
+    # Kernel versionado
+    k1 = mmA.save_kernel("Sou a Krirk v1", note="inicial", activate=True)
+    check("kernel ativo", mmA.get_active_kernel() == "Sou a Krirk v1")
+    k2 = mmA.save_kernel("Sou a Krirk v2 mais sarcastica", note="evolucao", activate=True)
+    check("novo kernel vira ativo", mmA.get_active_kernel() == "Sou a Krirk v2 mais sarcastica")
+    check("rollback reativa o antigo", mmA.activate_kernel(k1) and mmA.get_active_kernel() == "Sou a Krirk v1")
+    check("lista de kernels tem 2", len(mmA.list_kernels()) == 2)
+
+    # Propostas pendentes
+    pid = mmA.add_proposal("sublation", '{"delete":[1,2]}', rationale="memorias conflitantes")
+    check("proposta pendente aparece", len(mmA.get_pending_proposals()) == 1)
+    mmA.set_proposal_status(pid, "approved")
+    check("proposta aprovada some da fila", mmA.get_pending_proposals() == [])
+finally:
+    shutil.rmtree(tmpA, ignore_errors=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. Injeção de interioridade no system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("14. Injecao no system prompt")
+
+from backend.core.personality import PersonalitySystem
+
+ps = PersonalitySystem("configs/personality.json")
+prompt = ps.build_system_prompt(
+    current_emotion="feliz",
+    lexicon=[{"term": "farmar aura de neandertal", "meaning": "chamar de burro"}],
+    insights=[{"content": "anda jogando muito terror", "category": "insight"}],
+    recent_diary=[{"content": "fiquei animada com o projeto dele", "mood": "empolgada"}],
+    brain_state="caótica e imprevisível",
+)
+check("prompt injeta lexicon", "farmar aura de neandertal" in prompt)
+check("prompt injeta insight", "jogando muito terror" in prompt)
+check("prompt injeta diario", "animada com o projeto" in prompt)
+check("prompt injeta brain_state", "caótica" in prompt)
+check("nucleo imutavel preservado (sem emoji)", "Nunca use emojis" in prompt)
+
+# Persona kernel substitui a identidade padrao mas mantem o nucleo
+prompt_k = ps.build_system_prompt(current_emotion="neutro",
+                                  persona_kernel="Sou a Krirk, uma entidade curiosa e caótica.")
+check("persona kernel entra no prompt", "entidade curiosa e caótica" in prompt_k)
+check("nucleo fixo sobrevive ao kernel", "Home:" in prompt_k and "Nunca use emojis" in prompt_k)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

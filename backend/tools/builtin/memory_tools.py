@@ -151,6 +151,38 @@ def make_search_history(memory) -> Tool:
     )
 
 
+def make_coin_term(memory) -> Tool:
+    """Cunha um bordão/gíria interno — a Krirk cria ou o usuário oficializa."""
+
+    async def _coin_term(term: str, meaning: str) -> str:
+        term = term.strip()
+        meaning = meaning.strip()
+        if not term or not meaning:
+            return "[Erro] Preciso do termo e do significado para cunhar o bordão."
+        try:
+            is_new = memory.add_term("default", term, meaning, origin="conversa", pinned=True)
+            if is_new:
+                return f"Bordão nosso cunhado: \"{term}\" = {meaning}"
+            return f"Já tínhamos esse, reforcei: \"{term}\" = {meaning}"
+        except Exception as e:
+            return f"[Erro] Falha ao cunhar o bordão: {e}"
+
+    return Tool(
+        name="coin_term",
+        description=(
+            "Cria/oficializa uma GÍRIA ou BORDÃO interno de vocês dois (piada interna). "
+            "Use quando o usuário disser 'esse é nosso bordão', 'a partir de agora X significa Y', "
+            "ou quando VOCÊ inventar uma gíria nova que os dois vão adotar. "
+            "term = a expressão; meaning = quando/como usar."
+        ),
+        params=[
+            ToolParam("term", "A gíria/bordão (ex: 'farmar aura de neandertal')", "string"),
+            ToolParam("meaning", "O que significa e quando usar", "string"),
+        ],
+        func=_coin_term,
+    )
+
+
 def make_remember_fact(memory) -> Tool:
     """Memoriza permanentemente algo que o usuário pediu explicitamente para lembrar."""
 

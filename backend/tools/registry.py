@@ -116,9 +116,10 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
 
     # ── Tools de busca web ────────────────────────────────────────────────────
     try:
-        from backend.tools.builtin.web_tools import make_web_search
+        from backend.tools.builtin.web_tools import make_web_search, make_search_meme
         web_factories = {
             "web_search": make_web_search,
+            "search_meme": make_search_meme,
         }
         for name, factory in web_factories.items():
             if name in whitelist:
@@ -152,13 +153,14 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar code_tools: {e}")
 
-    # ── Tools de memória (busca semântica, busca temporal, memorizar) ────────
+    # ── Tools de memória (busca semântica, busca temporal, memorizar, léxico) ─
     if memory is not None:
         try:
             from backend.tools.builtin.memory_tools import (
                 make_search_memory,
                 make_search_history,
                 make_remember_fact,
+                make_coin_term,
             )
             if "search_memory" in whitelist:
                 registry.register(make_search_memory(memory))
@@ -166,6 +168,8 @@ def build_default_registry(config: dict, memory=None, router=None) -> ToolRegist
                 registry.register(make_search_history(memory))
             if "remember_this" in whitelist:
                 registry.register(make_remember_fact(memory))
+            if "coin_term" in whitelist:
+                registry.register(make_coin_term(memory))
         except Exception as e:
             print(f"[KRIRK][tools] Erro ao carregar memory_tools: {e}")
 

@@ -51,6 +51,31 @@ async def _web_search(query: str, max_results: str = "4") -> str:
     return await loop.run_in_executor(None, _sync_web_search, query, n)
 
 
+async def _search_meme(query: str) -> str:
+    """Busca o significado/contexto de um meme ou gíria da internet."""
+    loop = asyncio.get_event_loop()
+    tuned = f"significado meme gíria {query} explicação"
+    result = await loop.run_in_executor(None, _sync_web_search, tuned, 4)
+    if result.startswith("[Erro]") or result.startswith("Nenhum"):
+        return result
+    return f"Sobre o meme/gíria '{query}':\n\n{result}"
+
+
+def make_search_meme() -> Tool:
+    return Tool(
+        name="search_meme",
+        description=(
+            "Pesquisa o significado, origem ou contexto de um MEME ou GÍRIA da internet. "
+            "Use quando o usuário perguntar 'o que significa o meme X', 'que gíria é essa', "
+            "ou quando você quiser entender uma referência cultural para acompanhar o papo."
+        ),
+        params=[
+            ToolParam("query", "O meme ou gíria a investigar", "string"),
+        ],
+        func=_search_meme,
+    )
+
+
 def make_web_search() -> Tool:
     return Tool(
         name="web_search",
