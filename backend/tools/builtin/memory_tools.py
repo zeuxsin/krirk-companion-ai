@@ -56,10 +56,11 @@ def make_search_memory(memory) -> Tool:
     return Tool(
         name="search_memory",
         description=(
-            "Busca em conversas e fatos anteriores usando similaridade semântica. "
-            "Use quando o usuário perguntar sobre o que já foi discutido, "
-            "como 'você lembra quando falei sobre X?', 'o que eu te disse sobre Y?', "
-            "'qual era meu projeto mesmo?', 'você sabe meu nome?'."
+            "Busca em conversas anteriores usando similaridade semântica. "
+            "Use quando o usuário perguntar sobre um ASSUNTO específico já discutido: "
+            "'você lembra quando falei sobre X?', 'o que eu te disse sobre Y?'. "
+            "NÃO use para dados do perfil (nome, profissão, interesses) — "
+            "esses já estão no seu contexto."
         ),
         params=[
             ToolParam(

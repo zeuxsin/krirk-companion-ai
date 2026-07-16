@@ -43,8 +43,9 @@ def make_execute_python() -> Tool:
         name='execute_python',
         description=(
             'Executa um snippet de código Python e retorna a saída (stdout/stderr). '
-            'Use para calcular, processar dados, testar algoritmos, criar arquivos ou verificar resultados. '
-            'O código roda no mesmo ambiente Python do servidor.'
+            'Use APENAS quando o usuário pedir para rodar/testar código, ou para '
+            'computação genuinamente pesada. Contas simples são respondidas na conversa. '
+            'Para criar arquivos use write_file.'
         ),
         params=[
             ToolParam(

@@ -45,7 +45,12 @@ async def _run_powershell(command: str) -> str:
 def make_run_powershell() -> Tool:
     return Tool(
         name="run_powershell",
-        description="Executa um comando PowerShell no computador do usuário e retorna o resultado.",
+        description=(
+            "ÚLTIMO RECURSO: executa um comando PowerShell no computador. "
+            "Use apenas quando o usuário pedir explicitamente um comando/script "
+            "ou quando nenhuma outra ferramenta resolver. Nunca para desligar, "
+            "reiniciar ou apagar nada sem o usuário usar essas palavras."
+        ),
         params=[
             ToolParam("command", "Comando PowerShell a executar", "string"),
         ],

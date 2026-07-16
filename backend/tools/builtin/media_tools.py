@@ -227,7 +227,11 @@ def make_set_volume() -> Tool:
 def make_mute_volume() -> Tool:
     return Tool(
         name="mute_volume",
-        description="Alterna o silêncio (mute) do sistema. Silencia se ligado, ativa se mudo.",
+        description=(
+            "Alterna o mute do ÁUDIO DO SISTEMA (Windows). "
+            "NÃO use quando o usuário pedir para VOCÊ ficar quieta ou falar menos — "
+            "isso é sobre a assistente, não sobre o som do computador."
+        ),
         params=[],
         func=_mute_volume,
     )
