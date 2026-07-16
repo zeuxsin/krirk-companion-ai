@@ -807,6 +807,35 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 18. Filtro de small-talk (falsos positivos de ferramentas)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("18. Filtro de small-talk")
+
+from backend.core.orchestrator import _is_smalltalk
+
+# Casos que DEVEM pular o roteamento (small-talk puro)
+check("'Oi krirk como está no dia de hoje?' e small-talk",
+      _is_smalltalk("Oi krirk como está no dia de hoje?"))
+check("'oi' e small-talk", _is_smalltalk("oi"))
+check("'bom dia!' e small-talk", _is_smalltalk("bom dia!"))
+check("'tudo bem?' e small-talk", _is_smalltalk("tudo bem?"))
+check("'como vai você?' e small-talk", _is_smalltalk("como vai você?"))
+check("'valeu!' e small-talk", _is_smalltalk("valeu!"))
+
+# Casos que NUNCA podem ser filtrados (precisam do roteador)
+check("'que horas são?' NAO e small-talk", not _is_smalltalk("que horas são?"))
+check("'oi, que dia é hoje?' NAO e small-talk", not _is_smalltalk("oi, que dia é hoje?"))
+check("'oi, abre o notepad' NAO e small-talk", not _is_smalltalk("oi, abre o notepad"))
+check("'bom dia, como está o clima?' NAO e small-talk", not _is_smalltalk("bom dia, como está o clima?"))
+check("'oi, pesquisa sobre gatos' NAO e small-talk", not _is_smalltalk("oi, pesquisa sobre gatos"))
+check("'olá, rola um d20' NAO e small-talk", not _is_smalltalk("olá, rola um d20"))
+check("mensagem longa NAO e small-talk",
+      not _is_smalltalk("oi krirk, hoje eu queria conversar sobre um monte de coisas que aconteceram no trabalho"))
+check("pergunta factual NAO e small-talk", not _is_smalltalk("qual a capital da França?"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

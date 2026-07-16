@@ -30,6 +30,39 @@ def _detect_amusement(text: str) -> bool:
     return any(m in low for m in _AMUSEMENT_MARKERS)
 
 
+# ── Filtro de small-talk ──────────────────────────────────────────────────────
+# Saudações e conversa fiada NUNCA precisam de ferramenta, mas modelos pequenos
+# confundem "como está o dia de hoje?" com pedido de data/hora (get_time).
+# Este filtro determinístico pula o roteamento inteiro nesses casos.
+_SMALLTALK_RE = re.compile(
+    r"(?:^|\b)(oi+|ol[áa]|opa|e a[íi]|eae|bom dia|boa tarde|boa noite|"
+    r"tudo bem|td bem|tudo certo|como (?:vai|est[áa]|anda|voc[êe] (?:vai|est[áa]))|"
+    r"beleza|suave|obrigad[oa]|valeu|brigad[oa]|boa noite)(?:\b|$)",
+    re.IGNORECASE,
+)
+# Se QUALQUER um destes aparecer, a mensagem pode precisar de ferramenta —
+# o roteador decide. ("hora" pega "que horas"; cuidado: também casa "agora",
+# o que só torna o filtro mais conservador.)
+_ACTION_MARKERS = (
+    "abr", "fech", "toca", "pausa", "pesquis", "busca", "busque", "procur",
+    "digit", "escrev", "salv", "execut", "roda", "rode", "cria", "crie",
+    "mostra", "mostre", "clica", "clique", "lembra", "anota", "timer",
+    "alarme", "volume", "http", "www", "browser", "navegador", "tela",
+    "arquivo", "pasta", "clima", "previsão", "previsao", "hora", "que dia",
+    "data", "rola", "role", "dado",
+)
+
+
+def _is_smalltalk(text: str) -> bool:
+    """True para saudação/conversa fiada curta — pula o roteamento de tools."""
+    t = text.strip().lower()
+    if len(t) > 60:
+        return False
+    if not _SMALLTALK_RE.search(t):
+        return False
+    return not any(m in t for m in _ACTION_MARKERS)
+
+
 _OPEN_TAGS  = ("<thought>", "<thinking>", "<think>", "<scratchpad>", "<reflection>")
 _CLOSE_TAGS = ("</thought>", "</thinking>", "</think>", "</scratchpad>", "</reflection>")
 
@@ -286,6 +319,10 @@ class Orchestrator:
             "reactions ('ok', 'isso aí', 'certo', 'sim', 'não', 'ótimo', 'entendi', 'legal', "
             "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, questions about the assistant "
             "itself, or casual chat. When in doubt, respond: none\n"
+            "- get_time: ONLY when the user EXPLICITLY asks the current time or date "
+            "('que horas são?', 'que dia é hoje?'). Questions about WELL-BEING or how the "
+            "day is going ('como está?', 'como vai seu dia?', 'como está no dia de hoje?') "
+            "are small talk even though they mention 'dia' or 'hoje' — respond: none\n"
             "- search_memory: ONLY use when the user is EXPLICITLY asking to recall past "
             "conversations ('você lembra?', 'o que eu te falei?', 'qual era mesmo?'). "
             "Do NOT use for confirmations or reactions to what was just said.\n"
@@ -377,7 +414,10 @@ class Orchestrator:
         # ── FASE 1: Planner + loop de agente ──────────────────────────────────
         tool_result_context = ""
         executed_tools: list[tuple[str, str]] = []
-        if self._tool_cfg.get("enabled", False) and self.tool_executor:
+        skip_tools = _is_smalltalk(message)
+        if skip_tools:
+            print("[KRIRK][tools] Small-talk detectado — roteamento pulado")
+        if self._tool_cfg.get("enabled", False) and self.tool_executor and not skip_tools:
             max_rounds = self._tool_cfg.get("max_rounds", 4)
 
             decision = await self._decide_tool(message, history)
@@ -565,7 +605,10 @@ class Orchestrator:
                     "Se perguntou só a hora, diga só a hora. Se perguntou só o clipboard, diga só o conteúdo. "
                     "Não mencione dados extras que não foram pedidos. "
                     "NUNCA afirme ter feito algo que não aparece no resultado acima — "
-                    "se o pedido tinha mais partes e só esta foi executada, diga o que faltou."
+                    "se o pedido tinha mais partes e só esta foi executada, diga o que faltou. "
+                    "IMPORTANTE: se o resultado acima NÃO tiver relação com o que o usuário "
+                    "realmente perguntou (ferramenta errada foi consultada), IGNORE o resultado "
+                    "por completo e responda à pergunta normalmente, com sua personalidade."
                 )
 
             llm_messages.append({
@@ -649,7 +692,7 @@ class Orchestrator:
 
         # ── Tool routing (mesmo _decide_tool do chat normal; sem planos) ──────
         tool_result_context = ""
-        if self._tool_cfg.get("enabled", False) and self.tool_executor:
+        if self._tool_cfg.get("enabled", False) and self.tool_executor and not _is_smalltalk(message):
             decision = await self._decide_tool(message, history)
 
             if decision["type"] == "tool":
