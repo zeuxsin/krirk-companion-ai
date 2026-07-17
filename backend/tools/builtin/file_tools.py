@@ -45,12 +45,14 @@ def _safe_path(path_str: str) -> Path | None:
     Retorna None se o caminho for considerado inseguro.
     """
     try:
-        p = Path(path_str).expanduser().resolve()
-        # Permitir home e subdiretórios, ou caminhos absolutos dentro do home
+        p = Path(path_str).expanduser()
+        # Caminho relativo ("agenda_x/arq.py"): resolver contra o Desktop —
+        # nunca contra o cwd do backend, que fica fora do home e sempre falharia
+        if not p.is_absolute():
+            p = _HOME / "Desktop" / p
+        p = p.resolve()
         if p.is_relative_to(_HOME):
             return p
-        # Permitir também se o usuário digitou um caminho relativo (resolve para cwd)
-        # Neste caso aceitar apenas dentro do home ou Desktop
         return None
     except Exception:
         return None

@@ -162,6 +162,12 @@ check("safe_path aceita subpasta do home", _safe_path(str(HOME / "Documents")) i
 check("safe_path REJEITA C:\\Windows", _safe_path("C:\\Windows\\System32") is None)
 check("safe_path REJEITA traversal para fora do home",
       _safe_path(str(HOME / ".." / ".." / "Windows")) is None)
+check("safe_path relativo resolve contra o Desktop",
+      _safe_path("agenda_e_recompensas") == (HOME / "Desktop" / "agenda_e_recompensas"))
+check("safe_path relativo com subpasta resolve contra o Desktop",
+      _safe_path("pasta/arquivo.py") == (HOME / "Desktop" / "pasta" / "arquivo.py"))
+check("safe_path relativo REJEITA traversal para fora do home",
+      _safe_path("../../Windows") is None)
 
 # Roundtrip write -> read -> list em pasta temporária (dentro do home no Windows)
 tmp2 = Path(tempfile.mkdtemp(prefix="krirk_ft_"))
@@ -934,10 +940,21 @@ check("detecta 'está salvo em'", _claims_action("O app está salvo em sua área
 check("detecta 'Pasta criada:'", _claims_action("Pasta criada: C:\\Users\\erik_\\Desktop\\agenda_e_recompensas"))
 check("detecta 'Arquivos movidos'", _claims_action("Arquivos movidos:\n- agenda.json\n- agenda.py"))
 check("detecta 'movi os'", _claims_action("Já movi os dois arquivos pra pasta."))
+check("detecta 'Arquivo criado: C:...' (alucinacao pos-falha)",
+      _claims_action("Arquivo criado: C:\\Users\\erik_\\Desktop\\agenda_e_recompensas\\agenda_gui.py"))
 check("oferta NAO e alegacao", not _claims_action("Quer que eu abra o site? É só pedir."))
 check("oferta de pasta NAO e alegacao", not _claims_action("Quer que eu crie uma pasta chamada agenda_e_recompensas e mova os arquivos?"))
 check("conversa normal NAO e alegacao", not _claims_action("O site do salão tá ficando ótimo, Erik."))
 check("'abriu' do usuario em citacao... conversa comum ok", not _claims_action("legal que o navegador funcionou"))
+
+# Regras anti-mentira no fluxo de ferramentas (guarda de regressão no fonte)
+orq_src = (Path(__file__).parent.parent / "backend" / "core" / "orchestrator.py").read_text(encoding="utf-8")
+check("guarda cobre ferramenta que FALHOU (nao so zero ferramentas)",
+      "alega sucesso mas a ferramenta FALHOU" in orq_src)
+check("roteador exige caminho COMPLETO nos params", "PATHS in params must be COMPLETE" in orq_src)
+check("roteador pode corrigir params apos [Erro]", "retry the SAME tool" in orq_src)
+check("oferta de ARQUIVO aceita usa write_file+GENERATE, nunca create_folder",
+      "NOT create_folder" in orq_src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -985,6 +1002,18 @@ check("extrai maior bloco de codigo", _largest_code_block(texto_com_codigo) == "
 check("sem bloco retorna None", _largest_code_block("texto puro sem codigo") is None)
 dois_blocos = "```python\ncurto\n```\ntexto\n```python\nbloco bem mais longo aqui dentro\n```"
 check("escolhe o MAIOR bloco", "mais longo" in _largest_code_block(dois_blocos))
+
+# _strip_outer_fence — cerca SEM fechamento (geração truncada em max_tokens)
+from backend.core.orchestrator import _strip_outer_fence
+check("cerca aberta (truncada) e removida",
+      _strip_outer_fence("```python\nimport tkinter\nx = 1") == "import tkinter\nx = 1")
+check("cerca fechada tambem funciona",
+      _strip_outer_fence("```python\nprint('oi')\n```") == "print('oi')")
+check("texto sem cerca passa intacto",
+      _strip_outer_fence("import os\nprint(1)") == "import os\nprint(1)")
+check("cerca sem linguagem", _strip_outer_fence("```\ncodigo\n```") == "codigo")
+check("cerca aberta e o arquivo NAO comeca com ```python",
+      not _strip_outer_fence("```python\nimport tkinter as tk").startswith("```"))
 
 hist = [
     {"role": "user", "content": "faz um script"},

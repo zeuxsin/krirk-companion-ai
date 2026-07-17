@@ -97,6 +97,21 @@ def _largest_code_block(text: str) -> str | None:
     return max(blocks, key=len).strip() if blocks else None
 
 
+def _strip_outer_fence(text: str) -> str:
+    """
+    Remove a cerca markdown externa mesmo SEM fechamento (saída truncada em
+    max_tokens deixa ```python aberto — o regex de bloco fechado não pega).
+    """
+    t = (text or "").strip()
+    if t.startswith("```"):
+        first_nl = t.find("\n")
+        t = t[first_nl + 1:] if first_nl != -1 else ""
+    t = t.rstrip()
+    if t.endswith("```"):
+        t = t[:-3]
+    return t.strip()
+
+
 def _resolve_last_response(params: dict, history: list[dict]) -> dict:
     """
     Substitui <LAST_RESPONSE> em params.content pela última resposta da
@@ -406,6 +421,9 @@ class Orchestrator:
                 "Tools ALREADY EXECUTED for this request (with results):\n"
                 + "\n".join(lines)
                 + "\nIf these results already fulfill the user's request, respond: none\n"
+                "If a result starts with [Erro], that action FAILED: retry the SAME tool "
+                "ONCE with corrected params (e.g. the COMPLETE path from the conversation) "
+                "— if you cannot fix the cause, respond: none\n"
                 "Otherwise, choose the NEXT tool needed to continue.\n\n"
             )
 
@@ -447,8 +465,14 @@ class Orchestrator:
             "- ACCEPTED OFFER (critical): if the LAST Assistant message in Recent conversation "
             "OFFERS an action ('Quer que eu crie/abra/mova/salve...?') and the user now accepts "
             "('sim', 'isso', 'pode', 'pode fazer', 'faz', 'manda', 'bora'), that acceptance IS "
-            "the action request: execute the OFFERED action (tool or plan). NEVER respond none "
-            "to an accepted offer — the user is waiting for it to happen.\n"
+            "the action request: execute EXACTLY the action that was offered (tool or plan). "
+            "If the offer was to CREATE A FILE with code/content (an app, script, document), "
+            "that is write_file with content \"<GENERATE>\" — NOT create_folder. NEVER respond "
+            "none to an accepted offer — the user is waiting for it to happen.\n"
+            "- PATHS in params must be COMPLETE: start from a known folder ('Desktop/...', "
+            "'Documents/...') or absolute ('C:/Users/...'). NEVER a bare name like "
+            "'minha_pasta' — find the real location in Recent conversation. "
+            'Example: {"path": "Desktop/agenda_e_recompensas/agenda_gui.py"}\n'
             "- ORGANIZE FILES ('coloca numa pasta', 'move para X'): use create_folder and "
             "move_file — a plan when there are multiple items. Not run_powershell.\n"
             "- If the user REQUESTS AN ACTION (lembrar, abrir, tocar, criar timer, salvar, "
@@ -560,17 +584,25 @@ class Orchestrator:
             f"Escreva o CONTEÚDO COMPLETO do arquivo '{path}' para atender este "
             f"pedido do usuário:\n\n{user_message}\n\n"
             "Regras: responda APENAS com o conteúdo do arquivo, completo e "
-            "funcional, do início ao fim. Sem explicações antes ou depois. "
+            "funcional, do início ao fim. Código ENXUTO — sem comentários longos "
+            "nem recursos além do pedido, para caber inteiro na resposta. "
+            "Use apenas a biblioteca padrão do Python (tkinter, json, os...), "
+            "a menos que o usuário peça outra explicitamente. "
+            "Sem explicações antes ou depois. "
             "Pode usar cerca de código (```), que será removida."
         )
         raw = await self.router.complete(
-            "code", [{"role": "user", "content": prompt}],
-            temperature=0.4, max_tokens=4000,
+            "code", [
+                # nemotron gasta o orçamento de tokens em reasoning antes do
+                # código e trunca o arquivo — este toggle oficial desliga isso
+                # (inofensivo para os demais modelos)
+                {"role": "system", "content": "detailed thinking off"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.4, max_tokens=8000,
         )
-        generated = _largest_code_block(raw) or _strip_reasoning(raw or "").strip()
-        if not generated:
-            # Sem conteúdo — deixa o executor falhar com mensagem clara
-            generated = ""
+        # Bloco fechado > cerca aberta (truncada) > texto cru sem reasoning
+        generated = _largest_code_block(raw) or _strip_outer_fence(_strip_reasoning(raw or ""))
         print(f"[KRIRK][generate] Conteúdo gerado para {path}: {len(generated)} chars")
         new_params = dict(params)
         new_params["content"] = generated
@@ -712,7 +744,10 @@ class Orchestrator:
                     executed_tools.append((tool_name, result))
 
                     if result.startswith("[Erro]"):
-                        break
+                        # 1 chance de o roteador corrigir os params (o erro entra no
+                        # executed_context); decisão repetida ou none encerram o loop
+                        decision = await self._decide_tool(message, history, executed=executed_tools)
+                        continue
 
                     # Ação executada com sucesso = pedido atendido; não re-decidir
                     # (evita regravar/refazer com conteúdo regenerado e drift)
@@ -832,6 +867,9 @@ class Orchestrator:
                     "Não mencione dados extras que não foram pedidos. "
                     "NUNCA afirme ter feito algo que não aparece no resultado acima — "
                     "se o pedido tinha mais partes e só esta foi executada, diga o que faltou. "
+                    "Se o resultado começa com [Erro], a ação NÃO aconteceu: diga que falhou "
+                    "e o motivo em linguagem simples — NUNCA anuncie sucesso nem invente "
+                    "caminhos de arquivos. "
                     "IMPORTANTE: se o resultado acima NÃO tiver relação com o que o usuário "
                     "realmente perguntou (ferramenta errada foi consultada), IGNORE o resultado "
                     "por completo e responda à pergunta normalmente, com sua personalidade."
@@ -855,22 +893,38 @@ class Orchestrator:
         # Pós-processamento: remove reasoning tags
         clean_response = _strip_reasoning(full_response)
 
-        # Guarda de honestidade: alegou ação ("abrindo o Firefox...") sem ferramenta?
-        # Reescreve uma vez para transformar a alegação em oferta.
-        if not executed_tools and _claims_action(clean_response):
-            print(f"[KRIRK][honestidade] Resposta alega ação sem ferramenta — reescrevendo: {clean_response[:80]}")
+        # Guarda de honestidade: alegou ação sem NENHUMA ferramenta ter tido
+        # SUCESSO? (zero ferramentas OU todas retornaram [Erro]). Reescreve uma
+        # vez: sem ferramentas vira oferta; com falha vira relato honesto do erro.
+        ok_tools = [name for name, res in executed_tools if not res.startswith("[Erro]")]
+        if not ok_tools and _claims_action(clean_response):
+            if executed_tools:
+                errors = "; ".join(res[:150] for _, res in executed_tools)
+                print(f"[KRIRK][honestidade] Resposta alega sucesso mas a ferramenta FALHOU — reescrevendo: {clean_response[:80]}")
+                rewrite_instruction = (
+                    "A ferramenta que você tentou usar FALHOU — NADA foi feito no computador "
+                    f"e NENHUM arquivo novo existe. Erro real: {errors}\n"
+                    "Reescreva a resposta abaixo para admitir honestamente que não conseguiu, "
+                    "explicando o problema em linguagem simples e se oferecendo para tentar "
+                    "de novo. NUNCA afirme que algo foi criado/salvo/movido/aberto. "
+                    "Sem emojis, português. "
+                    f"Responda APENAS com a resposta reescrita.\n\nResposta: {clean_response}"
+                )
+            else:
+                print(f"[KRIRK][honestidade] Resposta alega ação sem ferramenta — reescrevendo: {clean_response[:80]}")
+                rewrite_instruction = (
+                    "Reescreva a resposta abaixo removendo QUALQUER alegação de que uma "
+                    "ação foi/está sendo executada (abrir, rodar, salvar...). Nenhuma ação "
+                    "aconteceu e NENHUM arquivo novo existe — não afirme que algo 'está "
+                    "pronto/salvo/disponível em' lugar nenhum. Transforme em OFERTA curta "
+                    "e natural, mantendo o tom (ex: 'Quer que eu crie o arquivo? É só "
+                    "pedir.'). Sem emojis, português. "
+                    f"Responda APENAS com a resposta reescrita.\n\nResposta: {clean_response}"
+                )
             try:
                 rewritten = await self.router.complete(
                     "chat",
-                    [{"role": "user", "content": (
-                        "Reescreva a resposta abaixo removendo QUALQUER alegação de que uma "
-                        "ação foi/está sendo executada (abrir, rodar, salvar...). Nenhuma ação "
-                        "aconteceu e NENHUM arquivo novo existe — não afirme que algo 'está "
-                        "pronto/salvo/disponível em' lugar nenhum. Transforme em OFERTA curta "
-                        "e natural, mantendo o tom (ex: 'Quer que eu crie o arquivo? É só "
-                        "pedir.'). Sem emojis, português. "
-                        f"Responda APENAS com a resposta reescrita.\n\nResposta: {clean_response}"
-                    )}],
+                    [{"role": "user", "content": rewrite_instruction}],
                     temperature=0.6, max_tokens=200,
                 )
                 rewritten = _strip_reasoning((rewritten or "").strip())
