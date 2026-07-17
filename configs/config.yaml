@@ -158,3 +158,10 @@ tools:
 plugins:
   enabled: true
   dir: "plugins"       # cada .py deve expor register(registry) — veja plugins/exemplo_dado.py
+
+# ── Telegram: a Krirk no celular ─────────────────────────────────────────────
+# 1. Crie um bot no @BotFather do Telegram (/newbot) e copie o token
+# 2. Coloque no .env:  TELEGRAM_BOT_TOKEN=123456:ABC...
+# 3. Reinicie o backend e mande /start para o bot — o primeiro chat vira o dono
+telegram:
+  enabled: true        # sem token no .env, fica inativo (só um aviso no log)

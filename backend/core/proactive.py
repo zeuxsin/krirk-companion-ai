@@ -376,4 +376,13 @@ class ProactiveMonitor:
             payload["audio"] = audio_b64
 
         await self._ws_manager.broadcast(payload)
+
+        # Canais extras (ex: Telegram) — registrados via extra_broadcast
+        extra = getattr(self, "extra_broadcast", None)
+        if extra is not None:
+            try:
+                await extra(comment, audio_b64)
+            except Exception as e:
+                print(f"[KRIRK][proactive] extra_broadcast falhou: {e}")
+
         print(f"[KRIRK][proactive] Comentário ({trigger}): {comment[:80]}")

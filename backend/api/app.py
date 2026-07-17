@@ -72,6 +72,22 @@ def create_app() -> FastAPI:
         except Exception as e:
             print(f"[KRIRK][memory] Purge falhou: {e}")
         await proactive_monitor.start()
+
+        # Ponte Telegram — a Krirk no celular (token no .env, nunca no yaml)
+        import os
+        tg_cfg = config.get("telegram", {})
+        tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        if tg_cfg.get("enabled", False) and tg_token:
+            try:
+                from backend.integrations.telegram_bridge import TelegramBridge
+                bridge = TelegramBridge(orchestrator, tg_token)
+                await bridge.start()
+                # Mensagens espontâneas (proativo/sonho/notas) também vão pro Telegram
+                proactive_monitor.extra_broadcast = bridge.send_to_owner
+            except Exception as e:
+                print(f"[KRIRK][telegram] Falha ao iniciar bridge: {e}")
+        elif tg_cfg.get("enabled", False):
+            print("[KRIRK][telegram] Habilitado no config mas TELEGRAM_BOT_TOKEN ausente no .env")
         yield
 
     app = FastAPI(

@@ -916,6 +916,38 @@ check("'abriu' do usuario em citacao... conversa comum ok", not _claims_action("
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 21. Ponte Telegram — funções puras
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("21. Ponte Telegram")
+
+from backend.integrations.telegram_bridge import split_message, extract_message
+
+check("msg curta = 1 parte", split_message("oi krirk") == ["oi krirk"])
+check("msg vazia = 0 partes", split_message("") == [])
+long_msg = "\n".join(f"paragrafo {i} " + "x" * 100 for i in range(50))
+parts = split_message(long_msg)
+check("msg longa dividida", len(parts) > 1)
+check("todas as partes cabem no limite", all(len(p) <= 4096 for p in parts))
+check("conteudo preservado na divisao", "paragrafo 49" in parts[-1])
+giant_para = "y" * 9000
+gparts = split_message(giant_para)
+check("paragrafo gigante cortado duro", len(gparts) == 3 and sum(len(p) for p in gparts) == 9000)
+
+upd_text = {"update_id": 1, "message": {"chat": {"id": 42}, "from": {"first_name": "Erik"}, "text": "  oi  "}}
+m = extract_message(upd_text)
+check("extrai texto com chat_id", m == {"chat_id": 42, "name": "Erik", "text": "oi"})
+
+upd_voice = {"update_id": 2, "message": {"chat": {"id": 42}, "from": {"first_name": "Erik"}, "voice": {"file_id": "abc123"}}}
+m = extract_message(upd_voice)
+check("extrai voice note", m["voice_file_id"] == "abc123" and "text" not in m)
+
+check("sticker/foto ignorado", extract_message({"update_id": 3, "message": {"chat": {"id": 42}, "sticker": {}}}) is None)
+check("update sem message ignorado", extract_message({"update_id": 4, "edited_message": {}}) is None)
+check("sem chat_id ignorado", extract_message({"update_id": 5, "message": {"text": "oi"}}) is None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 
