@@ -135,7 +135,11 @@ _TERMINAL_TOOLS = {
 _ACTION_CLAIM_RE = re.compile(
     r"\b(vou abrir|abrindo|acabei de abrir|abri o|abri a|vou executar|executando|"
     r"vou rodar|rodando o|vou criar o arquivo|criando o arquivo|salvando|"
-    r"deixa comigo|s[óo] um segundo|um momento enquanto)\b",
+    r"deixa comigo|s[óo] um segundo|um momento enquanto|"
+    # particípios/pretéritos — "Arquivo salvo: C:\..." era a alucinação que escapava
+    r"arquivo (?:salvo|criado|pronto)|salvei o|criei o arquivo|"
+    r"salv[oa] (?:em|na|no) [cC]:|criad[oa] (?:em|na|no) [cC]:|"
+    r"est[áa] (?:salvo|criado|pronto) (?:em|na|no)\b)",
     re.IGNORECASE,
 )
 
@@ -453,6 +457,13 @@ class Orchestrator:
             "it is auto-replaced by your previous message (largest code block if any). "
             'Example: {"tool": "write_file", "params": {"path": "desktop/agenda.txt", '
             '"content": "<LAST_RESPONSE>"}}\n'
+            "- CREATE NEW SUBSTANTIAL CONTENT into a file (an app, script, long document "
+            "that does NOT exist yet in the conversation): NEVER write the content inline "
+            "(your output gets truncated and NOTHING executes). Use content EXACTLY "
+            "\"<GENERATE>\" — a specialized model will write the full file from the user's "
+            'request. Example: {"tool": "write_file", "params": '
+            '{"path": "desktop/app_agenda.py", "content": "<GENERATE>"}}\n'
+            "  Inline content is ONLY for short things (a few lines).\n"
             "- MODIFY A FILE you created ('muda X para Y no arquivo', 'corrige'): call "
             "write_file again to the SAME path (see 'Last file you created') with the FULL "
             "corrected content — rewrite it from the Recent conversation with the fix applied. "
@@ -505,7 +516,7 @@ class Orchestrator:
             "tools",
             [{"role": "user", "content": planning_prompt}],
             temperature=0.1,
-            max_tokens=300,
+            max_tokens=600,
         )
 
         raw = raw.strip()
@@ -523,6 +534,38 @@ class Orchestrator:
             "tool": payload["tool"],
             "params": _resolve_last_response(payload.get("params", {}), history),
         }
+
+    async def _maybe_generate_content(self, payload: dict, user_message: str) -> dict:
+        """
+        Resolve <GENERATE>: o roteador delega a criação de conteúdo substancial
+        (apps, scripts, documentos) ao modelo de código — inline no JSON do
+        roteador o conteúdo estourava o limite de tokens e truncava a decisão.
+        """
+        params = payload.get("params", {})
+        content = params.get("content")
+        if not isinstance(content, str) or content.strip() != "<GENERATE>":
+            return payload
+
+        path = str(params.get("path", "arquivo"))
+        prompt = (
+            f"Escreva o CONTEÚDO COMPLETO do arquivo '{path}' para atender este "
+            f"pedido do usuário:\n\n{user_message}\n\n"
+            "Regras: responda APENAS com o conteúdo do arquivo, completo e "
+            "funcional, do início ao fim. Sem explicações antes ou depois. "
+            "Pode usar cerca de código (```), que será removida."
+        )
+        raw = await self.router.complete(
+            "code", [{"role": "user", "content": prompt}],
+            temperature=0.4, max_tokens=4000,
+        )
+        generated = _largest_code_block(raw) or _strip_reasoning(raw or "").strip()
+        if not generated:
+            # Sem conteúdo — deixa o executor falhar com mensagem clara
+            generated = ""
+        print(f"[KRIRK][generate] Conteúdo gerado para {path}: {len(generated)} chars")
+        new_params = dict(params)
+        new_params["content"] = generated
+        return {"tool": payload["tool"], "params": new_params}
 
     def _track_written_file(self, payload: dict, result: str) -> None:
         """Guarda o path do último write_file bem-sucedido (contexto de edição)."""
@@ -615,11 +658,12 @@ class Orchestrator:
                         payload = {"tool": step_decision["tool"], "params": step_decision["params"]}
 
                     payload = self._prep_payload(payload, history)
+                    payload = await self._maybe_generate_content(payload, message)
                     tool_name = payload["tool"]
 
                     self.state.set(AISystemState.EXECUTING)
                     yield {"type": "status", "state": "executing"}
-                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
+                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)[:500]}
 
                     result = await self.tool_executor.execute_from_json(json.dumps(payload))
                     self._track_written_file(payload, result)
@@ -645,11 +689,12 @@ class Orchestrator:
                     prev_decision_json = decision_json
 
                     payload = self._prep_payload(payload, history)
+                    payload = await self._maybe_generate_content(payload, message)
                     tool_name = payload["tool"]
 
                     self.state.set(AISystemState.EXECUTING)
                     yield {"type": "status", "state": "executing"}
-                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
+                    yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)[:500]}
 
                     result = await self.tool_executor.execute_from_json(json.dumps(payload))
                     self._track_written_file(payload, result)
@@ -907,10 +952,11 @@ class Orchestrator:
             results: list[str] = []
             for raw_payload in payloads:
                 payload = self._prep_payload(raw_payload, history)
+                payload = await self._maybe_generate_content(payload, message)
                 tool_name = payload["tool"]
                 self.state.set(AISystemState.EXECUTING)
                 yield {"type": "status", "state": "executing"}
-                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
+                yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)[:500]}
 
                 result = await self.tool_executor.execute_from_json(json.dumps(payload))
                 self._track_written_file(payload, result)

@@ -910,6 +910,11 @@ from backend.core.orchestrator import _claims_action
 check("detecta 'Abrindo o Firefox'", _claims_action("Abrindo o Firefox pra você agora."))
 check("detecta 'vou abrir'", _claims_action("Beleza, vou abrir o site do salão."))
 check("detecta 'só um segundo'", _claims_action("Deixa comigo, só um segundo."))
+check("detecta 'Arquivo salvo: C:...' (alucinacao do Telegram)",
+      _claims_action("Arquivo salvo: C:\\Users\\erik_\\Desktop\\agenda_com_recompensas.txt"))
+check("detecta 'salvei o'", _claims_action("Pronto, salvei o arquivo pra você."))
+check("detecta 'criado na C:'", _claims_action("Tá criado na C:\\Users\\erik_\\Desktop."))
+check("detecta 'está salvo em'", _claims_action("O app está salvo em sua área de trabalho."))
 check("oferta NAO e alegacao", not _claims_action("Quer que eu abra o site? É só pedir."))
 check("conversa normal NAO e alegacao", not _claims_action("O site do salão tá ficando ótimo, Erik."))
 check("'abriu' do usuario em citacao... conversa comum ok", not _claims_action("legal que o navegador funcionou"))
