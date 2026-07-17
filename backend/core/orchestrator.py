@@ -117,6 +117,19 @@ def _resolve_last_response(params: dict, history: list[dict]) -> dict:
     return new_params
 
 
+# Ferramentas de AÇÃO: uma execução bem-sucedida ENCERRA o loop iterativo.
+# Sem isso o roteador "melhora" o resultado em rounds seguintes — ex: regravar
+# a mesma agenda 3x até alucinar o dia errado. Encadeamentos multi-ação
+# legítimos usam o PLANO (todas as etapas decididas de uma vez).
+_TERMINAL_TOOLS = {
+    "write_file", "open_url", "open_app", "open_file", "set_timer",
+    "remember_this", "coin_term", "set_brain_state", "type_text",
+    "press_hotkey", "focus_window", "set_volume", "mute_volume",
+    "media_play_pause", "media_next", "media_prev", "set_clipboard",
+    "browser_open", "browser_click", "browser_fill", "browser_close",
+}
+
+
 # Alegações de ação que a Krirk NÃO pode fazer sem ferramenta executada —
 # usado como telemetria de honestidade (loga quando o modelo alucina ação)
 _ACTION_CLAIM_RE = re.compile(
@@ -647,6 +660,11 @@ class Orchestrator:
                     if result.startswith("[Erro]"):
                         break
 
+                    # Ação executada com sucesso = pedido atendido; não re-decidir
+                    # (evita regravar/refazer com conteúdo regenerado e drift)
+                    if tool_name in _TERMINAL_TOOLS:
+                        break
+
                     decision = await self._decide_tool(message, history, executed=executed_tools)
 
             if executed_tools:
@@ -793,8 +811,10 @@ class Orchestrator:
                     [{"role": "user", "content": (
                         "Reescreva a resposta abaixo removendo QUALQUER alegação de que uma "
                         "ação foi/está sendo executada (abrir, rodar, salvar...). Nenhuma ação "
-                        "aconteceu. Transforme em OFERTA curta e natural, mantendo o tom "
-                        "(ex: 'Quer que eu abra o site? É só pedir.'). Sem emojis, português. "
+                        "aconteceu e NENHUM arquivo novo existe — não afirme que algo 'está "
+                        "pronto/salvo/disponível em' lugar nenhum. Transforme em OFERTA curta "
+                        "e natural, mantendo o tom (ex: 'Quer que eu crie o arquivo? É só "
+                        "pedir.'). Sem emojis, português. "
                         f"Responda APENAS com a resposta reescrita.\n\nResposta: {clean_response}"
                     )}],
                     temperature=0.6, max_tokens=200,
@@ -872,15 +892,21 @@ class Orchestrator:
             "request mentioning the destination (e.g. 'salva na área de trabalho')."
         )
 
-        # ── Tool routing (mesmo _decide_tool do chat normal; sem planos) ──────
+        # ── Tool routing (planos com steps completos também executam) ─────────
         tool_result_context = ""
         if self._tool_cfg.get("enabled", False) and self.tool_executor and not _is_smalltalk(message):
             decision = await self._decide_tool(message, history)
 
+            # Plano no coder: executa só os passos DICT (completos); sem re-roteamento
+            payloads: list[dict] = []
             if decision["type"] == "tool":
-                payload = self._prep_payload(
-                    {"tool": decision["tool"], "params": decision["params"]}, history
-                )
+                payloads = [{"tool": decision["tool"], "params": decision["params"]}]
+            elif decision["type"] == "plan":
+                payloads = [s for s in decision["steps"] if isinstance(s, dict)]
+
+            results: list[str] = []
+            for raw_payload in payloads:
+                payload = self._prep_payload(raw_payload, history)
                 tool_name = payload["tool"]
                 self.state.set(AISystemState.EXECUTING)
                 yield {"type": "status", "state": "executing"}
@@ -890,7 +916,10 @@ class Orchestrator:
                 self._track_written_file(payload, result)
                 print(f"[KRIRK][code] {tool_name} → {result[:150]}")
                 yield {"type": "tool_result", "tool": tool_name, "result": result}
-                tool_result_context = result
+                results.append(f"[{tool_name}] {result}")
+                if result.startswith("[Erro]"):
+                    break
+            tool_result_context = "\n\n".join(results)
 
         # ── Monta contexto para qwen2.5-coder ────────────────────────────────
         llm_messages = [{"role": "system", "content": system}]

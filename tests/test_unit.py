@@ -991,6 +991,24 @@ check("ignora tools que nao sao write_file", ft._last_written_file == "C:\\Users
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 23. Ferramentas terminais (loop nao regrava apos sucesso)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("23. Ferramentas terminais")
+
+from backend.core.orchestrator import _TERMINAL_TOOLS
+
+check("write_file e terminal (nao regrava em loop)", "write_file" in _TERMINAL_TOOLS)
+check("open_app e terminal", "open_app" in _TERMINAL_TOOLS)
+check("set_timer e terminal", "set_timer" in _TERMINAL_TOOLS)
+check("remember_this e terminal", "remember_this" in _TERMINAL_TOOLS)
+check("read_file NAO e terminal (pode encadear)", "read_file" not in _TERMINAL_TOOLS)
+check("web_search NAO e terminal", "web_search" not in _TERMINAL_TOOLS)
+check("search_memory NAO e terminal", "search_memory" not in _TERMINAL_TOOLS)
+check("browser_read NAO e terminal (le e continua)", "browser_read" not in _TERMINAL_TOOLS)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 
