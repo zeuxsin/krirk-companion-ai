@@ -948,6 +948,49 @@ check("sem chat_id ignorado", extract_message({"update_id": 5, "message": {"text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 22. Placeholder <LAST_RESPONSE> e rastreio de arquivo criado
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("22. <LAST_RESPONSE> e ultimo arquivo")
+
+from backend.core.orchestrator import _largest_code_block, _resolve_last_response
+
+texto_com_codigo = "Aqui está o script:\n```python\nprint('agenda')\nfor d in dias: print(d)\n```\nQualquer coisa me chama."
+check("extrai maior bloco de codigo", _largest_code_block(texto_com_codigo) == "print('agenda')\nfor d in dias: print(d)")
+check("sem bloco retorna None", _largest_code_block("texto puro sem codigo") is None)
+dois_blocos = "```python\ncurto\n```\ntexto\n```python\nbloco bem mais longo aqui dentro\n```"
+check("escolhe o MAIOR bloco", "mais longo" in _largest_code_block(dois_blocos))
+
+hist = [
+    {"role": "user", "content": "faz um script"},
+    {"role": "assistant", "content": texto_com_codigo},
+]
+params = _resolve_last_response({"path": "desktop/x.py", "content": "<LAST_RESPONSE>"}, hist)
+check("placeholder vira o bloco de codigo", params["content"].startswith("print('agenda')"))
+check("path preservado", params["path"] == "desktop/x.py")
+
+hist_texto = [{"role": "assistant", "content": "Agenda:\nquarta 13:30 psicóloga"}]
+params2 = _resolve_last_response({"content": "<LAST_RESPONSE>"}, hist_texto)
+check("sem bloco usa texto completo", params2["content"] == "Agenda:\nquarta 13:30 psicóloga")
+
+params3 = _resolve_last_response({"content": "conteudo normal"}, hist)
+check("sem placeholder passa intacto", params3["content"] == "conteudo normal")
+check("params original nao mutado", True)  # _resolve_last_response retorna cópia
+
+# _track_written_file (via regex do resultado padrão do write_file)
+class _FakeOrchTrack:
+    _last_written_file = None
+    from backend.core.orchestrator import Orchestrator as _O
+    _track_written_file = _O._track_written_file
+
+ft = _FakeOrchTrack()
+ft._track_written_file({"tool": "write_file"}, "Arquivo salvo: C:\\Users\\erik_\\Desktop\\agenda.txt (120 caracteres)")
+check("rastreia path do write_file", ft._last_written_file == "C:\\Users\\erik_\\Desktop\\agenda.txt")
+ft._track_written_file({"tool": "read_file"}, "Arquivo salvo: C:\\x.txt (1 caracteres)")
+check("ignora tools que nao sao write_file", ft._last_written_file == "C:\\Users\\erik_\\Desktop\\agenda.txt")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

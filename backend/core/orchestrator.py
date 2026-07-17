@@ -84,6 +84,39 @@ def _parse_fact_lines(raw: str) -> list[str]:
     return facts
 
 
+# ── Placeholder <LAST_RESPONSE> ───────────────────────────────────────────────
+# "Salva isso na área de trabalho" referencia conteúdo que o roteador não
+# consegue reproduzir (código longo da mensagem anterior). O roteador usa o
+# placeholder e o orchestrator o substitui pelo conteúdo real do histórico.
+_CODE_BLOCK_RE = re.compile(r"```[a-zA-Z0-9_+#.-]*\n(.*?)```", re.DOTALL)
+
+
+def _largest_code_block(text: str) -> str | None:
+    """Maior bloco ```...``` do texto, ou None se não houver."""
+    blocks = _CODE_BLOCK_RE.findall(text or "")
+    return max(blocks, key=len).strip() if blocks else None
+
+
+def _resolve_last_response(params: dict, history: list[dict]) -> dict:
+    """
+    Substitui <LAST_RESPONSE> em params.content pela última resposta da
+    assistente no histórico (maior bloco de código, se houver — para 'salva
+    esse script'; senão o texto completo — para 'salva essa agenda').
+    """
+    content = params.get("content")
+    if not isinstance(content, str) or "<LAST_RESPONSE>" not in content:
+        return params
+    last = next(
+        (m["content"] for m in reversed(history) if m.get("role") == "assistant"),
+        "",
+    )
+    block = _largest_code_block(last)
+    replacement = block if block else last.strip()
+    new_params = dict(params)
+    new_params["content"] = content.replace("<LAST_RESPONSE>", replacement)
+    return new_params
+
+
 # Alegações de ação que a Krirk NÃO pode fazer sem ferramenta executada —
 # usado como telemetria de honestidade (loga quando o modelo alucina ação)
 _ACTION_CLAIM_RE = re.compile(
@@ -224,6 +257,9 @@ class Orchestrator:
         # ── Brain-state (Fase D) — humor de geração controlável pela Krirk ───
         self._brain_state = "chill"   # focused | chill | creative | chaos
 
+        # Último arquivo criado via write_file — contexto para "muda X no arquivo"
+        self._last_written_file: str | None = None
+
         # ── Provider router (NVIDIA → Google → Cerebras → Ollama) ────────────
         self.router: ProviderRouter = build_router(config)
 
@@ -326,17 +362,23 @@ class Orchestrator:
 
         tool_desc = self.tool_registry.get_descriptions()
 
-        # Inclui as últimas 4 mensagens do histórico para dar contexto ao roteador
-        # (ex: "abre de novo" — o qwen precisa saber que Notepad estava aberto antes)
+        # Últimas mensagens para o roteador resolver referências ("muda aquilo",
+        # "salva isso"). 300 chars/msg: o suficiente para ver conteúdos pequenos
+        # (agendas, listas) sem estourar o prompt; código longo usa <LAST_RESPONSE>.
         history_context = ""
         if history:
-            recent = history[-4:]  # últimas 4 trocas
+            recent = history[-6:]
             lines = []
             for m in recent:
                 role = "User" if m["role"] == "user" else "Assistant"
-                lines.append(f"{role}: {m['content'][:120]}")
+                lines.append(f"{role}: {m['content'][:300]}")
             if lines:
                 history_context = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
+        # Último arquivo criado — para pedidos de modificação
+        last_file_context = ""
+        if self._last_written_file:
+            last_file_context = f"Last file you created: {self._last_written_file}\n\n"
 
         # Passos já executados nesta requisição (loop de agente)
         executed_context = ""
@@ -367,6 +409,7 @@ class Orchestrator:
             f"User home directory: {_HOME}\n\n"
             f"Available tools:\n{tool_desc}\n\n"
             f"{history_context}"
+            f"{last_file_context}"
             f"{executed_context}"
             f"User message: {message}\n\n"
             "Rules:\n"
@@ -392,6 +435,15 @@ class Orchestrator:
             "- CREATIVE WRITING is conversation, not a tool: 'escreve um poema/texto/história/"
             "mensagem' WITHOUT a destination → none (just answer in chat). Only use write_file "
             "if the user names a FILE, or type_text if they name an APP/field to type into.\n"
+            "- SAVE WHAT YOU JUST GENERATED ('salva isso', 'coloca na área de trabalho', "
+            "'cria esse arquivo'): use write_file with content EXACTLY \"<LAST_RESPONSE>\" — "
+            "it is auto-replaced by your previous message (largest code block if any). "
+            'Example: {"tool": "write_file", "params": {"path": "desktop/agenda.txt", '
+            '"content": "<LAST_RESPONSE>"}}\n'
+            "- MODIFY A FILE you created ('muda X para Y no arquivo', 'corrige'): call "
+            "write_file again to the SAME path (see 'Last file you created') with the FULL "
+            "corrected content — rewrite it from the Recent conversation with the fix applied. "
+            "NEVER respond none to a correction request.\n"
             "- run_powershell: LAST RESORT — only when the user explicitly asks to run a "
             "command/script, or no other tool can do it. NEVER shutdown/restart/kill/delete "
             "unless the user used those exact words.\n"
@@ -451,6 +503,20 @@ class Orchestrator:
             # Dentro de um passo não aceitamos sub-planos — vira none
             return {"type": "none"}
         return decision
+
+    def _prep_payload(self, payload: dict, history: list[dict]) -> dict:
+        """Resolve <LAST_RESPONSE> nos params antes de executar."""
+        return {
+            "tool": payload["tool"],
+            "params": _resolve_last_response(payload.get("params", {}), history),
+        }
+
+    def _track_written_file(self, payload: dict, result: str) -> None:
+        """Guarda o path do último write_file bem-sucedido (contexto de edição)."""
+        if payload.get("tool") == "write_file" and result.startswith("Arquivo salvo: "):
+            m = re.match(r"Arquivo salvo: (.+?) \(", result)
+            if m:
+                self._last_written_file = m.group(1)
 
     # ── Pipeline principal ────────────────────────────────────────────────────
 
@@ -535,6 +601,7 @@ class Orchestrator:
                             continue
                         payload = {"tool": step_decision["tool"], "params": step_decision["params"]}
 
+                    payload = self._prep_payload(payload, history)
                     tool_name = payload["tool"]
 
                     self.state.set(AISystemState.EXECUTING)
@@ -542,6 +609,7 @@ class Orchestrator:
                     yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
 
                     result = await self.tool_executor.execute_from_json(json.dumps(payload))
+                    self._track_written_file(payload, result)
                     print(f"[KRIRK][agent] passo {i+1}/{len(steps)}: {tool_name} → {result[:150]}")
                     yield {"type": "tool_result", "tool": tool_name, "result": result}
                     executed_tools.append((tool_name, result))
@@ -563,6 +631,7 @@ class Orchestrator:
                         break
                     prev_decision_json = decision_json
 
+                    payload = self._prep_payload(payload, history)
                     tool_name = payload["tool"]
 
                     self.state.set(AISystemState.EXECUTING)
@@ -570,6 +639,7 @@ class Orchestrator:
                     yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
 
                     result = await self.tool_executor.execute_from_json(json.dumps(payload))
+                    self._track_written_file(payload, result)
                     print(f"[KRIRK][agent] round {_round + 1}/{max_rounds}: {tool_name} → {result[:150]}")
                     yield {"type": "tool_result", "tool": tool_name, "result": result}
                     executed_tools.append((tool_name, result))
@@ -792,8 +862,14 @@ class Orchestrator:
             "Respond in Brazilian Portuguese (pt-BR). "
             "Be technical, concise and direct. "
             "Use markdown code blocks with language tags (```python, ```javascript, etc). "
-            "When asked to execute or test code, use the execute_python tool. "
-            "Explain errors clearly and suggest fixes."
+            "Explain errors clearly and suggest fixes.\n\n"
+            f"You RUN on the user's real Windows PC (not a sandbox). Real paths: "
+            f"Home={_HOME}, Desktop={_HOME}/Desktop. Files ARE saved via tools "
+            "(write_file) and code IS executed (execute_python) — when a tool runs, "
+            "its result appears in this conversation. NEVER claim you lack access "
+            "to the user's computer or files. If no tool result appears for a save/run "
+            "request, say the action did not happen and ask the user to repeat the "
+            "request mentioning the destination (e.g. 'salva na área de trabalho')."
         )
 
         # ── Tool routing (mesmo _decide_tool do chat normal; sem planos) ──────
@@ -802,13 +878,16 @@ class Orchestrator:
             decision = await self._decide_tool(message, history)
 
             if decision["type"] == "tool":
-                payload = {"tool": decision["tool"], "params": decision["params"]}
+                payload = self._prep_payload(
+                    {"tool": decision["tool"], "params": decision["params"]}, history
+                )
                 tool_name = payload["tool"]
                 self.state.set(AISystemState.EXECUTING)
                 yield {"type": "status", "state": "executing"}
                 yield {"type": "tool_call", "tool": tool_name, "raw": json.dumps(payload)}
 
                 result = await self.tool_executor.execute_from_json(json.dumps(payload))
+                self._track_written_file(payload, result)
                 print(f"[KRIRK][code] {tool_name} → {result[:150]}")
                 yield {"type": "tool_result", "tool": tool_name, "result": result}
                 tool_result_context = result
