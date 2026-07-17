@@ -78,12 +78,16 @@ def build_default_registry(config: dict, memory=None, router=None, orchestrator=
             make_list_directory,
             make_search_files,
             make_write_file,
+            make_create_folder,
+            make_move_file,
         )
         file_factories = {
             "read_file":       make_read_file,
             "list_directory":  make_list_directory,
             "search_files":    make_search_files,
             "write_file":      make_write_file,
+            "create_folder":   make_create_folder,
+            "move_file":       make_move_file,
         }
         for name, factory in file_factories.items():
             if name in whitelist:

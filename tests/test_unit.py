@@ -185,6 +185,22 @@ try:
     blocked = asyncio.run(_write_file("C:\\Windows\\hack.txt", "x"))
     check("write_file bloqueia fora do home", blocked.startswith("[Erro]"))
 
+    # create_folder + move_file (organização de arquivos)
+    from backend.tools.builtin.file_tools import _create_folder, _move_file
+    if _safe_path(str(tmp2)) is not None:
+        res = asyncio.run(_create_folder(str(tmp2 / "organizada")))
+        check("create_folder cria pasta", res.startswith("Pasta criada"))
+        asyncio.run(_write_file(str(tmp2 / "mover.txt"), "conteudo"))
+        res = asyncio.run(_move_file(str(tmp2 / "mover.txt"), str(tmp2 / "organizada")))
+        check("move_file para dentro de pasta existente", res.startswith("Movido") and (tmp2 / "organizada" / "mover.txt").exists())
+        check("origem sumiu apos mover", not (tmp2 / "mover.txt").exists())
+        res = asyncio.run(_move_file(str(tmp2 / "nao_existe.txt"), str(tmp2 / "organizada")))
+        check("move_file origem inexistente da erro", res.startswith("[Erro]"))
+    blocked = asyncio.run(_move_file("C:\\Windows\\system.ini", str(HOME / "Desktop")))
+    check("move_file bloqueia origem fora do home", blocked.startswith("[Erro]"))
+    blocked = asyncio.run(_create_folder("C:\\Windows\\pasta_hack"))
+    check("create_folder bloqueia fora do home", blocked.startswith("[Erro]"))
+
     missing = asyncio.run(_read_file(str(HOME / "arquivo_que_nao_existe_xyz.txt")))
     check("read_file arquivo inexistente da erro claro", "não encontrado" in missing)
 finally:
@@ -915,7 +931,11 @@ check("detecta 'Arquivo salvo: C:...' (alucinacao do Telegram)",
 check("detecta 'salvei o'", _claims_action("Pronto, salvei o arquivo pra você."))
 check("detecta 'criado na C:'", _claims_action("Tá criado na C:\\Users\\erik_\\Desktop."))
 check("detecta 'está salvo em'", _claims_action("O app está salvo em sua área de trabalho."))
+check("detecta 'Pasta criada:'", _claims_action("Pasta criada: C:\\Users\\erik_\\Desktop\\agenda_e_recompensas"))
+check("detecta 'Arquivos movidos'", _claims_action("Arquivos movidos:\n- agenda.json\n- agenda.py"))
+check("detecta 'movi os'", _claims_action("Já movi os dois arquivos pra pasta."))
 check("oferta NAO e alegacao", not _claims_action("Quer que eu abra o site? É só pedir."))
+check("oferta de pasta NAO e alegacao", not _claims_action("Quer que eu crie uma pasta chamada agenda_e_recompensas e mova os arquivos?"))
 check("conversa normal NAO e alegacao", not _claims_action("O site do salão tá ficando ótimo, Erik."))
 check("'abriu' do usuario em citacao... conversa comum ok", not _claims_action("legal que o navegador funcionou"))
 

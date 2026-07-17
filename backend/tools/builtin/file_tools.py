@@ -171,6 +171,67 @@ def make_search_files() -> Tool:
     )
 
 
+# ── create_folder ─────────────────────────────────────────────────────────────
+
+async def _create_folder(path: str) -> str:
+    safe = _safe_path(_resolve_aliases(path))
+    if safe is None:
+        return f"[Erro] Caminho não permitido (deve estar dentro de {_HOME}): {path}"
+    try:
+        safe.mkdir(parents=True, exist_ok=True)
+        return f"Pasta criada: {safe}"
+    except Exception as e:
+        return f"[Erro] Não foi possível criar a pasta '{safe}': {e}"
+
+
+def make_create_folder() -> Tool:
+    return Tool(
+        name="create_folder",
+        description="Cria uma pasta (e as pastas-pai, se necessário) dentro do home do usuário.",
+        params=[
+            ToolParam("path", "Caminho da pasta a criar (ex: desktop/minha_pasta)", "string"),
+        ],
+        func=_create_folder,
+    )
+
+
+# ── move_file ─────────────────────────────────────────────────────────────────
+
+async def _move_file(source: str, destination: str) -> str:
+    src = _safe_path(_resolve_aliases(source))
+    dst = _safe_path(_resolve_aliases(destination))
+    if src is None or dst is None:
+        return f"[Erro] Caminho não permitido (origem e destino devem estar dentro de {_HOME})."
+    if not src.exists():
+        return f"[Erro] Arquivo/pasta de origem não encontrado: {src}"
+    try:
+        import shutil
+        if dst.exists() and dst.is_dir():
+            final = dst / src.name
+        else:
+            final = dst
+            final.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(final))
+        return f"Movido: {src.name} → {final}"
+    except Exception as e:
+        return f"[Erro] Não foi possível mover '{src}': {e}"
+
+
+def make_move_file() -> Tool:
+    return Tool(
+        name="move_file",
+        description=(
+            "Move um arquivo ou pasta para outro local (dentro do home do usuário). "
+            "Se o destino for uma pasta existente, o item vai para dentro dela."
+        ),
+        params=[
+            ToolParam("source", "Caminho do arquivo/pasta a mover", "string"),
+            ToolParam("destination", "Pasta de destino ou novo caminho completo", "string"),
+        ],
+        func=_move_file,
+    )
+
+
 # ── write_file ─────────────────────────────────────────────────────────────────
 # Desativado na whitelist padrão — usar com cautela
 

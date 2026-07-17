@@ -132,6 +132,8 @@ tools:
     - set_timer
     - execute_python   # executa snippets Python localmente (Modo Coder)
     - write_file       # salva arquivos dentro do home do usuário (Desktop, Documents, etc.)
+    - create_folder    # cria pastas dentro do home
+    - move_file        # move arquivos/pastas (organização da área de trabalho)
     # ── Fase 3: visão ──
     - read_screen      # OCR da tela via modelo de visão (NVIDIA phi-4 → gemma3 local)
     # ── Fase 4: automação ──

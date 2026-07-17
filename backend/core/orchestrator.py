@@ -136,8 +136,9 @@ _ACTION_CLAIM_RE = re.compile(
     r"\b(vou abrir|abrindo|acabei de abrir|abri o|abri a|vou executar|executando|"
     r"vou rodar|rodando o|vou criar o arquivo|criando o arquivo|salvando|"
     r"deixa comigo|s[óo] um segundo|um momento enquanto|"
-    # particípios/pretéritos — "Arquivo salvo: C:\..." era a alucinação que escapava
-    r"arquivo (?:salvo|criado|pronto)|salvei o|criei o arquivo|"
+    # particípios/pretéritos — "Arquivo salvo:"/"Pasta criada:" eram alucinações que escapavam
+    r"arquivos? (?:salvos?|criados?|prontos?|movidos?)|pastas? (?:salvas?|criadas?|prontas?|movidas?)|"
+    r"salvei o|criei (?:o arquivo|a pasta)|movi (?:o|a|os|as)\b|"
     r"salv[oa] (?:em|na|no) [cC]:|criad[oa] (?:em|na|no) [cC]:|"
     r"est[áa] (?:salvo|criado|pronto) (?:em|na|no)\b)",
     re.IGNORECASE,
@@ -441,7 +442,15 @@ class Orchestrator:
             "- NEVER use a tool for: greetings, thanks, short replies, confirmations, "
             "reactions ('ok', 'isso aí', 'certo', 'sim', 'não', 'ótimo', 'entendi', 'legal', "
             "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, questions about the assistant "
-            "itself, or casual chat.\n"
+            "itself, or casual chat — EXCEPT when the confirmation ACCEPTS a pending offer "
+            "(next rule).\n"
+            "- ACCEPTED OFFER (critical): if the LAST Assistant message in Recent conversation "
+            "OFFERS an action ('Quer que eu crie/abra/mova/salve...?') and the user now accepts "
+            "('sim', 'isso', 'pode', 'pode fazer', 'faz', 'manda', 'bora'), that acceptance IS "
+            "the action request: execute the OFFERED action (tool or plan). NEVER respond none "
+            "to an accepted offer — the user is waiting for it to happen.\n"
+            "- ORGANIZE FILES ('coloca numa pasta', 'move para X'): use create_folder and "
+            "move_file — a plan when there are multiple items. Not run_powershell.\n"
             "- If the user REQUESTS AN ACTION (lembrar, abrir, tocar, criar timer, salvar, "
             "pesquisar), you MUST pick the matching tool — 'none' there means the action "
             "silently never happens. Reserve 'none' for conversation, not for requests.\n"
