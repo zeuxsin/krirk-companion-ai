@@ -131,6 +131,7 @@ tools:
     - open_app
     - set_timer
     - execute_python   # executa snippets Python localmente (Modo Coder)
+    - delegate_code    # delega código substancial ao Claude Code CLI (background)
     - write_file       # salva arquivos dentro do home do usuário (Desktop, Documents, etc.)
     - create_folder    # cria pastas dentro do home
     - move_file        # move arquivos/pastas (organização da área de trabalho)
@@ -155,6 +156,15 @@ tools:
     - coin_term        # cunha um bordão/gíria interno de vocês dois
     - search_meme      # busca significado de meme/gíria na internet
     - set_brain_state  # a Krirk troca o próprio humor de geração (focused/chill/creative/chaos)
+
+# ── Delegação de código ao Claude Code CLI (headless, em background) ─────────
+# Tarefas substanciais de código são delegadas ao agente 'claude' instalado na
+# máquina (usa a assinatura Claude do usuário). A Krirk avisa quando termina.
+claude_code:
+  enabled: true
+  model: "sonnet"        # modelo das delegações (sonnet = rápido/econômico)
+  timeout_seconds: 600   # limite por tarefa (10 min)
+  max_turns: 30          # limite de turnos do agente
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:

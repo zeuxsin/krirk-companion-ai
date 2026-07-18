@@ -137,8 +137,8 @@ def _resolve_last_response(params: dict, history: list[dict]) -> dict:
 # a mesma agenda 3x até alucinar o dia errado. Encadeamentos multi-ação
 # legítimos usam o PLANO (todas as etapas decididas de uma vez).
 _TERMINAL_TOOLS = {
-    "write_file", "open_url", "open_app", "open_file", "set_timer",
-    "remember_this", "coin_term", "set_brain_state", "type_text",
+    "write_file", "delegate_code", "open_url", "open_app", "open_file",
+    "set_timer", "remember_this", "coin_term", "set_brain_state", "type_text",
     "press_hotkey", "focus_window", "set_volume", "mute_volume",
     "media_play_pause", "media_next", "media_prev", "set_clipboard",
     "browser_open", "browser_click", "browser_fill", "browser_close",
@@ -507,8 +507,18 @@ class Orchestrator:
             "it is auto-replaced by your previous message (largest code block if any). "
             'Example: {"tool": "write_file", "params": {"path": "desktop/agenda.txt", '
             '"content": "<LAST_RESPONSE>"}}\n'
+            "- delegate_code (FIRST CHOICE for real coding, when listed above): creating "
+            "or changing an app/script/project, adding features, fixing bugs, multi-file "
+            "work. It runs in BACKGROUND and the user is notified when done. task = the "
+            "COMPLETE description of what to build/change (carry over every detail the "
+            "user gave), folder = the project folder from the conversation. Example: "
+            '{"tool": "delegate_code", "params": {"task": "adicionar barra de progresso '
+            'ao contador de recompensas do agenda_gui.py, sem remover funcionalidades", '
+            '"folder": "Desktop/agenda_e_recompensas"}}\n'
+            "  write_file is still correct for SIMPLE plain-text files (notes, lists).\n"
             "- CREATE NEW SUBSTANTIAL CONTENT into a file (an app, script, long document "
-            "that does NOT exist yet in the conversation): NEVER write the content inline "
+            "that does NOT exist yet in the conversation) when delegate_code is NOT "
+            "available: NEVER write the content inline "
             "(your output gets truncated and NOTHING executes). Use content EXACTLY "
             "\"<GENERATE>\" — a specialized model will write the full file from the user's "
             'request. Example: {"tool": "write_file", "params": '

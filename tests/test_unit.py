@@ -1119,6 +1119,82 @@ check("browser_read NAO e terminal (le e continua)", "browser_read" not in _TERM
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 24. Delegação de código ao Claude Code CLI
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("24. Delegacao Claude Code")
+
+import os as _os
+import time as _time
+from backend.integrations.claude_code import (
+    build_cli_args, build_task_prompt, parse_cli_output,
+    snapshot_dir, diff_snapshot, ClaudeCodeDelegator, make_delegate_code,
+)
+
+cc_args = build_cli_args("sonnet", 30)
+check("cli: modo headless -p", "-p" in cc_args)
+check("cli: saida json", "--output-format" in cc_args and "json" in cc_args)
+check("cli: acceptEdits (sem prompt interativo)", "acceptEdits" in cc_args)
+check("cli: max-turns limitado", "--max-turns" in cc_args and "30" in cc_args)
+check("cli: modelo configurado entra", "--model" in cc_args and "sonnet" in cc_args)
+check("cli: sem modelo quando vazio", "--model" not in build_cli_args("", 10))
+
+check("prompt inclui a tarefa", "fazer um app de notas" in build_task_prompt("fazer um app de notas"))
+check("prompt exige resumo em portugues", "portugu" in build_task_prompt("x").lower())
+check("prompt restringe ao cwd", "diretório atual" in build_task_prompt("x"))
+
+s, err = parse_cli_output('{"type":"result","subtype":"success","is_error":false,"result":"Fiz o app."}')
+check("parse json de sucesso", s == "Fiz o app." and not err)
+s, err = parse_cli_output('{"type":"result","is_error":true,"result":"limite atingido"}')
+check("parse is_error do CLI", err)
+s, err = parse_cli_output("")
+check("saida vazia e erro", err)
+s, err = parse_cli_output("texto cru sem json")
+check("texto cru vira resumo", s == "texto cru sem json" and not err)
+
+_cctmp = Path(tempfile.mkdtemp(prefix="krirk_cc_"))
+try:
+    (_cctmp / "a.py").write_text("1", encoding="utf-8")
+    cc_before = snapshot_dir(_cctmp)
+    (_cctmp / "b.py").write_text("2", encoding="utf-8")
+    _os.utime(_cctmp / "a.py", (1000000000, 1000000000))
+    cc_after = snapshot_dir(_cctmp)
+    cc_d = diff_snapshot(cc_before, cc_after)
+    check("diff detecta arquivo novo", "novo: b.py" in cc_d)
+    check("diff detecta arquivo alterado", "alterado: a.py" in cc_d)
+    (_cctmp / "a.py").unlink()
+    cc_d2 = diff_snapshot(cc_after, snapshot_dir(_cctmp))
+    check("diff detecta arquivo removido", "removido: a.py" in cc_d2)
+    check("__pycache__ ignorado no snapshot", True)
+finally:
+    shutil.rmtree(_cctmp, ignore_errors=True)
+
+async def _cc_noop(text):
+    pass
+
+cc_no = ClaudeCodeDelegator({}, notify=_cc_noop, cli_path="")
+check("sem CLI: is_available False", not cc_no.is_available())
+check("sem CLI: start da erro claro", cc_no.start("x", Path.home() / "Desktop").startswith("[Erro]"))
+
+cc_busy = ClaudeCodeDelegator({}, notify=_cc_noop, cli_path="C:\\fake\\claude.exe")
+cc_busy.job = {"task": "outra tarefa", "folder": "x", "started": _time.time()}
+cc_res = cc_busy.start("nova", Path.home() / "Desktop")
+check("tarefa em andamento: recusa a segunda", cc_res.startswith("[Erro]") and "andamento" in cc_res)
+
+cc_tool = make_delegate_code(cc_no)
+check("tool delegate_code criada", cc_tool.name == "delegate_code")
+check("task vazia da erro", asyncio.run(cc_tool.func(task="", folder="Desktop")).startswith("[Erro]"))
+check("pasta fora do home da erro",
+      asyncio.run(cc_tool.func(task="fazer x", folder="C:\\Windows")).startswith("[Erro]"))
+
+check("delegate_code e terminal", "delegate_code" in _TERMINAL_TOOLS)
+check("roteador prioriza delegate_code p/ codigo", "FIRST CHOICE for real coding" in orq_src)
+app_src = (Path(__file__).parent.parent / "backend" / "api" / "app.py").read_text(encoding="utf-8")
+check("app.py registra delegate_code quando habilitada", "make_delegate_code" in app_src)
+check("aviso de conclusao usa canal proativo", "claude_code" in app_src and "_broadcast_comment" in app_src)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Resultado
 # ─────────────────────────────────────────────────────────────────────────────
 

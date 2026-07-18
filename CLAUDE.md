@@ -41,6 +41,11 @@ só rodar com autorização do usuário.
 8. **Providers**: novos modelos/providers entram em
    `backend/providers/router.py` (TASK_MODELS/TASK_FALLBACK) e
    `configs/config.yaml`; nunca chumbar modelo em outro lugar.
+9. **Código substancial**: a tool `delegate_code` delega ao Claude Code CLI
+   (headless, background, aviso via canal proativo) —
+   `backend/integrations/claude_code.py`, registrada no `app.py` quando
+   `claude_code.enabled` e o CLI existe. `write_file + <GENERATE>` é o
+   fallback (offline/CLI ausente). Prompt do agente vai por STDIN, nunca argv.
 
 ## Não alterar sem necessidade explícita
 

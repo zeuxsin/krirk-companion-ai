@@ -131,6 +131,17 @@ orgulhosa, determinada, codando, jogando, tranquila`
   Chromium persistente headed; canais msedge → chrome → bundled, pois o
   chromium bundled dá erro SxS nesta máquina).
 - Whitelist em `configs/config.yaml → tools.whitelist`.
+- **delegate_code** (`backend/integrations/claude_code.py`): delega código
+  substancial ao Claude Code CLI (`~\.local\bin\claude.exe`; fallback
+  `shutil.which`). Headless: `-p --output-format json --permission-mode
+  acceptEdits --max-turns N`, prompt via STDIN (nunca argv — aspas/acentos no
+  Windows). Roda em BACKGROUND (single-slot: 1 tarefa por vez); ao terminar,
+  anuncia via `ProactiveMonitor._broadcast_comment(trigger="claude_code")`
+  (WS + TTS + Telegram + memória) com diff real de arquivos
+  (snapshot mtime antes/depois, ignora __pycache__). Registrada no `app.py`
+  (não no build_default_registry) quando `claude_code.enabled` + CLI presente.
+  Config: `claude_code:` (model sonnet, timeout 600s, max_turns 30).
+  Roteador prioriza p/ código real; `write_file+<GENERATE>` vira fallback.
 - **Plugins (Fase 6)**: `plugins/*.py` com `register(registry)` são carregados no
   boot (config `plugins.enabled`). NÃO passam pela whitelist. Erros isolados
   por plugin. Exemplo: `plugins/exemplo_dado.py` (roll_dice).

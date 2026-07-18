@@ -55,6 +55,22 @@ def create_app() -> FastAPI:
         reflection=reflection_engine, reflection_config=reflection_cfg,
     )
 
+    # Delegação de código ao Claude Code CLI — background + aviso proativo
+    cc_cfg = config.get("claude_code", {})
+    if cc_cfg.get("enabled", False):
+        from backend.integrations.claude_code import ClaudeCodeDelegator, make_delegate_code
+
+        async def _cc_notify(text: str) -> None:
+            await proactive_monitor._broadcast_comment(text, trigger="claude_code")
+
+        delegator = ClaudeCodeDelegator(cc_cfg, notify=_cc_notify)
+        if not delegator.is_available():
+            print("[KRIRK][claude-code] CLI 'claude' não encontrado — delegação desativada")
+        elif "delegate_code" in config.get("tools", {}).get("whitelist", []):
+            orchestrator.tool_registry.register(make_delegate_code(delegator))
+            orchestrator.code_delegator = delegator
+            print("[KRIRK][claude-code] delegate_code registrada (CLI encontrado)")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         set_proactive_monitor(proactive_monitor)
