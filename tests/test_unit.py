@@ -942,6 +942,22 @@ check("detecta 'Arquivos movidos'", _claims_action("Arquivos movidos:\n- agenda.
 check("detecta 'movi os'", _claims_action("Já movi os dois arquivos pra pasta."))
 check("detecta 'Arquivo criado: C:...' (alucinacao pos-falha)",
       _claims_action("Arquivo criado: C:\\Users\\erik_\\Desktop\\agenda_e_recompensas\\agenda_gui.py"))
+check("detecta 'Adicionado: icones...' (mentira sem tool)",
+      _claims_action("Adicionado: ícones simples, barra de progresso pro contador de recompensas."))
+check("detecta 'Adicionado: quarta-feira...'",
+      _claims_action("Adicionado: quarta-feira, 23/07, 13:30, psicóloga."))
+check("detecta 'Vou adicionar uns icones' (promessa)",
+      _claims_action("Visual primeiro faz sentido. Vou adicionar uns ícones simples."))
+check("detecta 'adicionei'", _claims_action("Pronto, adicionei o contador no app."))
+check("detecta 'atualizei'", _claims_action("Atualizei o arquivo com a barra de progresso."))
+check("detecta 'Reabre o app'", _claims_action("Tudo certo. Reabre o app pra ver como ficou."))
+check("detecta 'O arquivo foi atualizado com...' (mentira sem tool, sem dois-pontos)",
+      _claims_action("O arquivo foi atualizado com ícones simples e barra de progresso."))
+check("detecta 'foram adicionados'", _claims_action("Os ícones foram adicionados ao app."))
+check("detecta 'está atualizado'", _claims_action("O app está atualizado, pode conferir."))
+check("'mudei de ideia' NAO e alegacao", not _claims_action("mudei de ideia sobre o estilo"))
+check("'que tal adicionar X?' NAO e alegacao", not _claims_action("Que tal a gente adicionar ícones?"))
+check("'Quer que eu adicione?' NAO e alegacao", not _claims_action("Quer que eu adicione os ícones agora?"))
 check("oferta NAO e alegacao", not _claims_action("Quer que eu abra o site? É só pedir."))
 check("oferta de pasta NAO e alegacao", not _claims_action("Quer que eu crie uma pasta chamada agenda_e_recompensas e mova os arquivos?"))
 check("conversa normal NAO e alegacao", not _claims_action("O site do salão tá ficando ótimo, Erik."))
@@ -955,6 +971,13 @@ check("roteador exige caminho COMPLETO nos params", "PATHS in params must be COM
 check("roteador pode corrigir params apos [Erro]", "retry the SAME tool" in orq_src)
 check("oferta de ARQUIVO aceita usa write_file+GENERATE, nunca create_folder",
       "NOT create_folder" in orq_src)
+check("oferta cumprida nao se re-executa", "still PENDING" in orq_src)
+check("concordar com opiniao nao e aceite", "OPINION or IDEA" in orq_src)
+check("modificar arquivo usa GENERATE (le o disco), nunca LAST_RESPONSE",
+      "NEVER use \n            \"<LAST_RESPONSE> to modify a file" in orq_src.replace("\r\n", "\n")
+      or "NEVER use" in orq_src and "<LAST_RESPONSE> to modify a file" in orq_src)
+check("arquivo no disco e a unica verdade p/ modificacao",
+      "the file on disk is the only truth" in orq_src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1014,6 +1037,39 @@ check("texto sem cerca passa intacto",
 check("cerca sem linguagem", _strip_outer_fence("```\ncodigo\n```") == "codigo")
 check("cerca aberta e o arquivo NAO comeca com ```python",
       not _strip_outer_fence("```python\nimport tkinter as tk").startswith("```"))
+
+# <GENERATE> modo edição — arquivo existente entra no prompt (não regenera do zero)
+from backend.core.orchestrator import Orchestrator as _OrcG
+from backend.tools.builtin.file_tools import _safe_path as _sp_gen
+
+class _FakeRouterGen:
+    def __init__(self):
+        self.last_prompt = None
+    async def complete(self, task, messages, **kw):
+        self.last_prompt = messages[-1]["content"]
+        return "```python\nprint('novo')\n```"
+
+_gtmp = Path(tempfile.mkdtemp(prefix="krirk_gen_"))
+try:
+    if _sp_gen(str(_gtmp)) is None:
+        print("  SKIP  GENERATE modo edicao (TEMP fora do home neste sistema)")
+    else:
+        _frg = _FakeRouterGen()
+        _og = object.__new__(_OrcG)
+        _og.router = _frg
+        novo = asyncio.run(_og._maybe_generate_content(
+            {"tool": "write_file", "params": {"path": str(_gtmp / "novo.py"), "content": "<GENERATE>"}},
+            "cria um script"))
+        check("GENERATE novo: usa o conteudo do modelo", novo["params"]["content"] == "print('novo')")
+        check("GENERATE novo: prompt de arquivo novo", "JÁ EXISTE" not in _frg.last_prompt)
+        (_gtmp / "tem.py").write_text("velho = 1", encoding="utf-8")
+        ed = asyncio.run(_og._maybe_generate_content(
+            {"tool": "write_file", "params": {"path": str(_gtmp / "tem.py"), "content": "<GENERATE>"}},
+            "adiciona icones"))
+        check("GENERATE edicao: prompt inclui o conteudo atual", "velho = 1" in _frg.last_prompt)
+        check("GENERATE edicao: prompt manda PRESERVAR o resto", "PRESERVE" in _frg.last_prompt)
+finally:
+    shutil.rmtree(_gtmp, ignore_errors=True)
 
 hist = [
     {"role": "user", "content": "faz um script"},

@@ -155,7 +155,15 @@ _ACTION_CLAIM_RE = re.compile(
     r"arquivos? (?:salvos?|criados?|prontos?|movidos?)|pastas? (?:salvas?|criadas?|prontas?|movidas?)|"
     r"salvei o|criei (?:o arquivo|a pasta)|movi (?:o|a|os|as)\b|"
     r"salv[oa] (?:em|na|no) [cC]:|criad[oa] (?:em|na|no) [cC]:|"
-    r"est[áa] (?:salvo|criado|pronto) (?:em|na|no)\b)",
+    r"est[áa] (?:salvo|criado|pronto) (?:em|na|no)\b|"
+    # edições anunciadas/alegadas — "Vou adicionar ícones"/"Adicionado: ..." escaparam
+    r"vou (?:adicionar|colocar|atualizar|ajustar|implementar|aplicar) |"
+    r"vou (?:mudar|modificar) o |"
+    r"adicionei|atualizei|ajustei|implementei|apliquei|"
+    r"adicionad[oa]s?:|atualizad[oa]s?:|ajustad[oa]s?:|"
+    r"fo(?:i|ram) (?:atualizad|adicionad|criad|salv|movid|ajustad|aplicad|implementad)[oa]s?\b|"
+    r"est[áa] atualizad[oa]|"
+    r"reabre o app|j[áa] coloquei)",
     re.IGNORECASE,
 )
 
@@ -462,13 +470,22 @@ class Orchestrator:
             "'exato', 'claro', 'show', 'beleza', 'tá'), opinions, questions about the assistant "
             "itself, or casual chat — EXCEPT when the confirmation ACCEPTS a pending offer "
             "(next rule).\n"
-            "- ACCEPTED OFFER (critical): if the LAST Assistant message in Recent conversation "
-            "OFFERS an action ('Quer que eu crie/abra/mova/salve...?') and the user now accepts "
-            "('sim', 'isso', 'pode', 'pode fazer', 'faz', 'manda', 'bora'), that acceptance IS "
-            "the action request: execute EXACTLY the action that was offered (tool or plan). "
-            "If the offer was to CREATE A FILE with code/content (an app, script, document), "
-            "that is write_file with content \"<GENERATE>\" — NOT create_folder. NEVER respond "
-            "none to an accepted offer — the user is waiting for it to happen.\n"
+            "- ACCEPTED OFFER (critical): if the IMMEDIATELY PREVIOUS Assistant message "
+            "OFFERS or ANNOUNCES an action ('Quer que eu crie/abra/mova/salve...?', "
+            "'Vou adicionar X ao arquivo') and the user now accepts ('sim', 'isso', 'ok', "
+            "'pode', 'pode fazer', 'faz', 'manda', 'bora'), that acceptance IS the action "
+            "request: execute EXACTLY the action that was offered (tool or plan). "
+            "If the offer was to CREATE OR CHANGE A FILE with code/content (an app, script, "
+            "document), that is write_file with content \"<GENERATE>\" — NOT create_folder. "
+            "NEVER respond none to an accepted offer — the user is waiting for it to happen.\n"
+            "- An offer only counts if it is still PENDING. If the conversation already "
+            "shows its result ('Arquivo criado: ...', 'Movido: ...', 'Abrindo: ...'), it was "
+            "FULFILLED — never redo it because of a later casual reply. Only the "
+            "IMMEDIATELY PREVIOUS Assistant message can carry a pending offer.\n"
+            "- Agreeing with an OPINION or IDEA ('isso mesmo', 'concordo', 'acho que sim', "
+            "'todo tipo de ideia é relevante', 'faz sentido') is conversation → none. "
+            "Acceptance only exists when the assistant offered a CONCRETE ACTION in the "
+            "message immediately before.\n"
             "- PATHS in params must be COMPLETE: start from a known folder ('Desktop/...', "
             "'Documents/...') or absolute ('C:/Users/...'). NEVER a bare name like "
             "'minha_pasta' — find the real location in Recent conversation. "
@@ -497,10 +514,12 @@ class Orchestrator:
             'request. Example: {"tool": "write_file", "params": '
             '{"path": "desktop/app_agenda.py", "content": "<GENERATE>"}}\n'
             "  Inline content is ONLY for short things (a few lines).\n"
-            "- MODIFY A FILE you created ('muda X para Y no arquivo', 'corrige'): call "
-            "write_file again to the SAME path (see 'Last file you created') with the FULL "
-            "corrected content — rewrite it from the Recent conversation with the fix applied. "
-            "NEVER respond none to a correction request.\n"
+            "- MODIFY AN EXISTING FILE ('muda X', 'corrige', 'adiciona Y no arquivo'): use "
+            "write_file to the SAME path with content EXACTLY \"<GENERATE>\" — the system "
+            "reads the CURRENT file from disk and produces the updated version. NEVER use "
+            "<LAST_RESPONSE> to modify a file (it pastes your chat text over the file), and "
+            "NEVER respond none to a modification request — even if the conversation claims "
+            "the change was already made, the file on disk is the only truth.\n"
             "- run_powershell: LAST RESORT — only when the user explicitly asks to run a "
             "command/script, or no other tool can do it. NEVER shutdown/restart/kill/delete "
             "unless the user used those exact words.\n"
@@ -580,9 +599,22 @@ class Orchestrator:
             return payload
 
         path = str(params.get("path", "arquivo"))
-        prompt = (
-            f"Escreva o CONTEÚDO COMPLETO do arquivo '{path}' para atender este "
-            f"pedido do usuário:\n\n{user_message}\n\n"
+
+        # Se o arquivo JÁ EXISTE, gerar do zero DESTRÓI o que estava lá (perdeu
+        # o app duas vezes ao vivo). Modo edição: o modelo recebe o conteúdo
+        # atual e produz a versão atualizada, preservando o resto.
+        current_content = ""
+        try:
+            from backend.tools.builtin.file_tools import _resolve_aliases, _safe_path
+            existing = _safe_path(_resolve_aliases(path))
+            if existing is not None and existing.is_file():
+                current_content = existing.read_text(
+                    encoding="utf-8", errors="replace"
+                )[:9000]
+        except Exception:
+            current_content = ""
+
+        common_rules = (
             "Regras: responda APENAS com o conteúdo do arquivo, completo e "
             "funcional, do início ao fim. Código ENXUTO — sem comentários longos "
             "nem recursos além do pedido, para caber inteiro na resposta. "
@@ -591,6 +623,20 @@ class Orchestrator:
             "Sem explicações antes ou depois. "
             "Pode usar cerca de código (```), que será removida."
         )
+        if current_content:
+            prompt = (
+                f"O arquivo '{path}' JÁ EXISTE. Conteúdo atual:\n\n"
+                f"{current_content}\n\n"
+                f"Pedido do usuário:\n{user_message}\n\n"
+                "Gere a versão COMPLETA E ATUALIZADA do arquivo aplicando APENAS "
+                "o que o pedido exige — PRESERVE todo o resto exatamente como "
+                f"está, sem remover funcionalidades existentes. {common_rules}"
+            )
+        else:
+            prompt = (
+                f"Escreva o CONTEÚDO COMPLETO do arquivo '{path}' para atender "
+                f"este pedido do usuário:\n\n{user_message}\n\n{common_rules}"
+            )
         raw = await self.router.complete(
             "code", [
                 # nemotron gasta o orçamento de tokens em reasoning antes do
@@ -603,7 +649,8 @@ class Orchestrator:
         )
         # Bloco fechado > cerca aberta (truncada) > texto cru sem reasoning
         generated = _largest_code_block(raw) or _strip_outer_fence(_strip_reasoning(raw or ""))
-        print(f"[KRIRK][generate] Conteúdo gerado para {path}: {len(generated)} chars")
+        mode = "edição" if current_content else "novo"
+        print(f"[KRIRK][generate] Conteúdo gerado para {path} ({mode}): {len(generated)} chars")
         new_params = dict(params)
         new_params["content"] = generated
         return {"tool": payload["tool"], "params": new_params}
