@@ -1181,7 +1181,7 @@ from backend.integrations.claude_code import (
 
 cc_args = build_cli_args("sonnet", 30)
 check("cli: modo headless -p", "-p" in cc_args)
-check("cli: saida json", "--output-format" in cc_args and "json" in cc_args)
+check("cli: saida stream-json", "--output-format" in cc_args and "stream-json" in cc_args)
 check("cli: acceptEdits (sem prompt interativo)", "acceptEdits" in cc_args)
 check("cli: max-turns limitado", "--max-turns" in cc_args and "30" in cc_args)
 check("cli: modelo configurado entra", "--model" in cc_args and "sonnet" in cc_args)
@@ -1218,8 +1218,8 @@ finally:
     shutil.rmtree(_cctmp, ignore_errors=True)
 
 # Runner bloqueante — o uvicorn usa SelectorEventLoop no Windows, onde o
-# subprocess do asyncio NAO funciona; o CLI roda via thread + subprocess.run
-from backend.integrations.claude_code import run_cli_blocking
+# subprocess do asyncio NAO funciona; o CLI roda via thread + Popen streaming
+from backend.integrations.claude_code import run_cli_blocking, format_stream_event
 rc, out, err = run_cli_blocking(
     sys.executable, ["-c", "import sys; print('eco: ' + sys.stdin.read())"],
     "prompt via stdin", str(Path.home()), 30,
@@ -1229,9 +1229,52 @@ check("runner: prompt chega por stdin", "eco: prompt via stdin" in out)
 rc2, out2, err2 = run_cli_blocking(sys.executable, ["-c", "import sys; sys.exit(3)"], "", str(Path.home()), 30)
 check("runner: exit code propagado", rc2 == 3)
 
+# Formatador de eventos stream-json (janela de progresso)
+check("evento init vira [inicio]",
+      "[inicio]" in (format_stream_event('{"type":"system","subtype":"init","model":"sonnet"}') or ""))
+ev_texto = '{"type":"assistant","message":{"content":[{"type":"text","text":"criando o app"}]}}'
+check("texto do agente vira [claude]", "[claude] criando o app" in (format_stream_event(ev_texto) or ""))
+ev_tool = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"app.py"}}]}}'
+check("tool_use vira [ferramenta]", "[ferramenta] Write: app.py" in (format_stream_event(ev_tool) or ""))
+check("result ok vira [fim:ok]",
+      "[fim:ok]" in (format_stream_event('{"type":"result","is_error":false,"result":"pronto"}') or ""))
+check("linha nao-json e ignorada", format_stream_event("lixo qualquer") is None)
+check("evento sem interesse e ignorado", format_stream_event('{"type":"user","message":{}}') is None)
+
+# Runner streaming: CLI fake emite stream-json; result e capturado, progresso gravado
+_fake_cli_code = (
+    "import json, sys\n"
+    "sys.stdin.read()\n"
+    "print(json.dumps({'type':'assistant','message':{'content':[{'type':'text','text':'oi do fake'}]}}))\n"
+    "print(json.dumps({'type':'result','result':'fake terminou','is_error':False}))\n"
+)
+_ptmp = Path(tempfile.mkdtemp(prefix="krirk_prog_"))
+try:
+    (_ptmp / "fake_cli.py").write_text(_fake_cli_code, encoding="utf-8")
+    _plog = _ptmp / "progresso.log"
+    rc3, out3, err3 = run_cli_blocking(
+        sys.executable, [str(_ptmp / "fake_cli.py")], "x", str(_ptmp), 30, _plog,
+    )
+    check("streaming: captura o evento result", '"result"' in out3 and "fake terminou" in out3)
+    s_res, s_err = parse_cli_output(out3)
+    check("streaming: parse do result funciona", s_res == "fake terminou" and not s_err)
+    _plog_txt = _plog.read_text(encoding="utf-8") if _plog.exists() else ""
+    check("streaming: progresso gravado no log", "[claude] oi do fake" in _plog_txt)
+    check("streaming: fim gravado no log", "[fim:ok]" in _plog_txt)
+finally:
+    shutil.rmtree(_ptmp, ignore_errors=True)
+
+check("cli: stream-json + verbose", "stream-json" in build_cli_args("", 5) and "--verbose" in build_cli_args("", 5))
+
 cc_src = (Path(__file__).parent.parent / "backend" / "integrations" / "claude_code.py").read_text(encoding="utf-8")
 check("CLI roda em thread (to_thread), nao asyncio subprocess",
       "asyncio.to_thread" in cc_src and "await asyncio.create_subprocess_exec" not in cc_src)
+
+# Janela de progresso: persistente, reutilizada, nunca fecha sozinha
+check("janela NAO fecha sozinha", "NUNCA fecha sozinha" in cc_src and "Start-Sleep" not in cc_src)
+check("janela reutilizada se ainda aberta", "self._window_proc.poll() is None" in cc_src)
+check("console proprio (CREATE_NEW_CONSOLE)", "CREATE_NEW_CONSOLE" in cc_src)
+check("log de progresso persistente em data/", 'Path("data") / "claude_code.log"' in cc_src)
 
 async def _cc_noop(text):
     pass

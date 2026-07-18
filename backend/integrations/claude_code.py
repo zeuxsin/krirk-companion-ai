@@ -11,6 +11,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -21,6 +22,13 @@ _HOME = Path.home()
 
 # Fallback quando o instalador nativo não coloca o CLI no PATH do processo
 _DEFAULT_CLI = _HOME / ".local" / "bin" / "claude.exe"
+
+# Separador de fim de tarefa no log de progresso (a janela NÃO fecha sozinha:
+# o usuário reutiliza a mesma janela e mantém o histórico das tarefas)
+_END_SENTINEL = "=== FIM DA TAREFA ==="
+
+# Log persistente de progresso — acumula todas as tarefas (data/ é gitignored)
+_PROGRESS_LOG = Path("data") / "claude_code.log"
 
 
 def find_cli() -> str | None:
@@ -40,7 +48,11 @@ def build_cli_args(model: str, max_turns: int) -> list[str]:
     """
     args = [
         "-p",
-        "--output-format", "json",
+        # stream-json emite eventos linha a linha (progresso ao vivo na
+        # janela de acompanhamento); o evento final "result" tem o mesmo
+        # formato do modo json. --verbose é exigido pelo stream-json no -p.
+        "--output-format", "stream-json",
+        "--verbose",
         "--permission-mode", "acceptEdits",
         "--max-turns", str(max_turns),
         "--allowedTools", "Bash(python *)",
@@ -86,29 +98,113 @@ def parse_cli_output(raw: str) -> tuple[str, bool]:
     return raw[-1500:], False
 
 
+def format_stream_event(raw_line: str) -> str | None:
+    """
+    Converte um evento stream-json do CLI em linha legível pro log de
+    progresso (janela de acompanhamento). None = evento sem interesse.
+    """
+    try:
+        ev = json.loads(raw_line)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(ev, dict):
+        return None
+    t = ev.get("type")
+    if t == "system" and ev.get("subtype") == "init":
+        return f"[inicio] modelo {ev.get('model', '?')}"
+    if t == "assistant":
+        parts = []
+        for block in (ev.get("message") or {}).get("content", []):
+            bt = block.get("type")
+            if bt == "text" and (block.get("text") or "").strip():
+                parts.append(f"[claude] {block['text'].strip()}")
+            elif bt == "tool_use":
+                name = block.get("name", "?")
+                inp = block.get("input") or {}
+                target = str(
+                    inp.get("file_path") or inp.get("path")
+                    or inp.get("command") or inp.get("pattern") or ""
+                )[:120]
+                parts.append(f"[ferramenta] {name}: {target}" if target else f"[ferramenta] {name}")
+        return "\n".join(parts) if parts else None
+    if t == "result":
+        status = "ERRO" if ev.get("is_error") else "ok"
+        return f"[fim:{status}] {str(ev.get('result', ''))[:400]}"
+    return None
+
+
+def _append_progress(path: Path | None, text: str) -> None:
+    if path is None or not text:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except OSError:
+        pass
+
+
 def run_cli_blocking(
-    cli: str, args: list[str], prompt: str, cwd: str, timeout: int
+    cli: str,
+    args: list[str],
+    prompt: str,
+    cwd: str,
+    timeout: int,
+    progress_path: Path | None = None,
 ) -> tuple[int, str, str]:
     """
-    Executa o CLI de forma BLOQUEANTE (chamar via asyncio.to_thread).
+    Executa o CLI de forma BLOQUEANTE (chamar via asyncio.to_thread), lendo
+    o stdout linha a linha: cada evento stream-json vira progresso legível
+    no log e o evento final "result" vira o payload retornado (sem evento
+    result, retorna as últimas linhas cruas — fallback).
     asyncio.create_subprocess_exec NÃO funciona aqui: o uvicorn usa
     SelectorEventLoop no Windows, que não implementa subprocess assíncrono
     (NotImplementedError com mensagem vazia).
+    Timeout estourado mata o processo e levanta subprocess.TimeoutExpired.
     """
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [cli, *args],
-        input=prompt.encode("utf-8"),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         cwd=cwd,
-        capture_output=True,
-        timeout=timeout,
         creationflags=flags,
     )
-    return (
-        proc.returncode,
-        proc.stdout.decode("utf-8", errors="replace"),
-        proc.stderr.decode("utf-8", errors="replace"),
-    )
+    killed: list[bool] = []
+
+    def _kill():
+        killed.append(True)
+        proc.kill()
+
+    watchdog = threading.Timer(timeout, _kill)
+    watchdog.start()
+    result_line = ""
+    tail: list[str] = []
+    try:
+        proc.stdin.write(prompt.encode("utf-8"))
+        proc.stdin.close()
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not line.strip():
+                continue
+            tail.append(line)
+            if len(tail) > 200:
+                tail.pop(0)
+            pretty = format_stream_event(line)
+            if pretty:
+                _append_progress(progress_path, pretty)
+            try:
+                if json.loads(line).get("type") == "result":
+                    result_line = line
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        err = proc.stderr.read().decode("utf-8", errors="replace")
+        rc = proc.wait()
+    finally:
+        watchdog.cancel()
+    if killed:
+        raise subprocess.TimeoutExpired([cli], timeout)
+    return rc, result_line or "\n".join(tail), err
 
 
 def snapshot_dir(folder: Path) -> dict[str, float]:
@@ -155,6 +251,7 @@ class ClaudeCodeDelegator:
         self._notify = notify
         self._cli = cli_path if cli_path is not None else find_cli()
         self.job: dict | None = None
+        self._window_proc: subprocess.Popen | None = None
 
     def is_available(self) -> bool:
         return bool(self._cli)
@@ -178,17 +275,60 @@ class ClaudeCodeDelegator:
             "Você será avisado quando terminar — dá pra continuar conversando."
         )
 
+    def _open_progress_window(self, log_path: Path) -> None:
+        """
+        Abre (ou REUTILIZA) o console que acompanha o log ao vivo. A janela
+        NUNCA fecha sozinha: o usuário mantém o histórico de todas as tarefas
+        e fecha quando quiser — se fechar, a próxima tarefa abre outra
+        mostrando as últimas 400 linhas (contexto preservado no log).
+        """
+        if self._window_proc is not None and self._window_proc.poll() is None:
+            return  # janela ainda aberta — o log em -Wait puxa o novo conteúdo
+        ps_cmd = (
+            "$host.UI.RawUI.WindowTitle = 'KRIRK - Claude Code'; "
+            f"Get-Content -LiteralPath '{log_path}' -Wait -Tail 400"
+        )
+        try:
+            self._window_proc = subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-Command", ps_cmd],
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+            )
+        except Exception as e:
+            print(f"[KRIRK][claude-code] Janela de progresso falhou: {e}")
+
     async def _run(self, task: str, folder: Path) -> None:
         timeout = int(self._cfg.get("timeout_seconds", 600))
         model = str(self._cfg.get("model", "") or "")
         max_turns = int(self._cfg.get("max_turns", 30))
+
+        # Janela de acompanhamento (config claude_code.show_window) — log
+        # persistente: cada tarefa é um bloco novo no mesmo arquivo
+        progress: Path | None = None
+        if self._cfg.get("show_window", True):
+            progress = _PROGRESS_LOG
+            try:
+                progress.parent.mkdir(parents=True, exist_ok=True)
+                if not progress.exists():
+                    # utf-8-sig: BOM faz o Get-Content do PS 5.1 ler acentos
+                    progress.write_text("", encoding="utf-8-sig")
+                _append_progress(
+                    progress,
+                    "\n" + "═" * 60 + "\n"
+                    f"NOVA TAREFA — {time.strftime('%d/%m %H:%M:%S')}\n"
+                    f"Tarefa: {task}\nPasta: {folder}\n" + "─" * 60,
+                )
+                self._open_progress_window(progress)
+            except OSError:
+                progress = None
+
         before = snapshot_dir(folder)
         summary, ok = "", False
         try:
             rc, out, err = await asyncio.to_thread(
                 run_cli_blocking,
                 self._cli, build_cli_args(model, max_turns),
-                build_task_prompt(task), str(folder), timeout,
+                build_task_prompt(task), str(folder), timeout, progress,
             )
         except subprocess.TimeoutExpired:
             summary = f"passou do limite de {timeout // 60} minutos e foi cancelada"
@@ -200,6 +340,11 @@ class ClaudeCodeDelegator:
                 summary, ok = parsed, True
             else:
                 summary = parsed or err.strip()[-400:] or f"CLI saiu com código {rc}"
+        _append_progress(
+            progress,
+            f"\n{_END_SENTINEL} ({'concluída' if ok else 'FALHOU'}) — "
+            f"{time.strftime('%H:%M:%S')}",
+        )
 
         changed = diff_snapshot(before, snapshot_dir(folder))
         status = "ok" if ok else "FALHOU"

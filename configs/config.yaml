@@ -165,6 +165,7 @@ claude_code:
   model: "sonnet"        # modelo das delegações (sonnet = rápido/econômico)
   timeout_seconds: 600   # limite por tarefa (10 min)
   max_turns: 30          # limite de turnos do agente
+  show_window: true      # abre um console com o progresso ao vivo da tarefa
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:

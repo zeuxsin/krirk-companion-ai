@@ -568,9 +568,11 @@ class Orchestrator:
             'request. Example: {"tool": "write_file", "params": '
             '{"path": "desktop/app_agenda.py", "content": "<GENERATE>"}}\n'
             "  Inline content is ONLY for short things (a few lines).\n"
-            "- MODIFY AN EXISTING FILE ('muda X', 'corrige', 'adiciona Y no arquivo'): use "
-            "write_file to the SAME path with content EXACTLY \"<GENERATE>\" — the system "
-            "reads the CURRENT file from disk and produces the updated version. NEVER use "
+            "- MODIFY AN EXISTING FILE ('muda X', 'corrige', 'adiciona Y no arquivo'): "
+            "prefer delegate_code when it is listed (it reads and edits the real files). "
+            "Otherwise use write_file to the SAME path with content EXACTLY \"<GENERATE>\" "
+            "— the system reads the CURRENT file from disk and produces the updated "
+            "version. NEVER use "
             "<LAST_RESPONSE> to modify a file (it pastes your chat text over the file), and "
             "NEVER respond none to a modification request — even if the conversation claims "
             "the change was already made, the file on disk is the only truth.\n"
