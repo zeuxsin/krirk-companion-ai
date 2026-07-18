@@ -1169,6 +1169,22 @@ try:
 finally:
     shutil.rmtree(_cctmp, ignore_errors=True)
 
+# Runner bloqueante — o uvicorn usa SelectorEventLoop no Windows, onde o
+# subprocess do asyncio NAO funciona; o CLI roda via thread + subprocess.run
+from backend.integrations.claude_code import run_cli_blocking
+rc, out, err = run_cli_blocking(
+    sys.executable, ["-c", "import sys; print('eco: ' + sys.stdin.read())"],
+    "prompt via stdin", str(Path.home()), 30,
+)
+check("runner: exit 0", rc == 0)
+check("runner: prompt chega por stdin", "eco: prompt via stdin" in out)
+rc2, out2, err2 = run_cli_blocking(sys.executable, ["-c", "import sys; sys.exit(3)"], "", str(Path.home()), 30)
+check("runner: exit code propagado", rc2 == 3)
+
+cc_src = (Path(__file__).parent.parent / "backend" / "integrations" / "claude_code.py").read_text(encoding="utf-8")
+check("CLI roda em thread (to_thread), nao asyncio subprocess",
+      "asyncio.to_thread" in cc_src and "await asyncio.create_subprocess_exec" not in cc_src)
+
 async def _cc_noop(text):
     pass
 

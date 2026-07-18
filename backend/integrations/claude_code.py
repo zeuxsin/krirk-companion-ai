@@ -10,6 +10,7 @@ conclusão é anunciada pelos mesmos canais dos comentários proativos
 import asyncio
 import json
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -83,6 +84,31 @@ def parse_cli_output(raw: str) -> tuple[str, bool]:
     except json.JSONDecodeError:
         pass
     return raw[-1500:], False
+
+
+def run_cli_blocking(
+    cli: str, args: list[str], prompt: str, cwd: str, timeout: int
+) -> tuple[int, str, str]:
+    """
+    Executa o CLI de forma BLOQUEANTE (chamar via asyncio.to_thread).
+    asyncio.create_subprocess_exec NÃO funciona aqui: o uvicorn usa
+    SelectorEventLoop no Windows, que não implementa subprocess assíncrono
+    (NotImplementedError com mensagem vazia).
+    """
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.run(
+        [cli, *args],
+        input=prompt.encode("utf-8"),
+        cwd=cwd,
+        capture_output=True,
+        timeout=timeout,
+        creationflags=flags,
+    )
+    return (
+        proc.returncode,
+        proc.stdout.decode("utf-8", errors="replace"),
+        proc.stderr.decode("utf-8", errors="replace"),
+    )
 
 
 def snapshot_dir(folder: Path) -> dict[str, float]:
@@ -159,30 +185,21 @@ class ClaudeCodeDelegator:
         before = snapshot_dir(folder)
         summary, ok = "", False
         try:
-            proc = await asyncio.create_subprocess_exec(
-                self._cli, *build_cli_args(model, max_turns),
-                cwd=str(folder),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            rc, out, err = await asyncio.to_thread(
+                run_cli_blocking,
+                self._cli, build_cli_args(model, max_turns),
+                build_task_prompt(task), str(folder), timeout,
             )
-            try:
-                out, err = await asyncio.wait_for(
-                    proc.communicate(build_task_prompt(task).encode("utf-8")),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                summary = f"passou do limite de {timeout // 60} minutos e foi cancelada"
-            else:
-                parsed, is_err = parse_cli_output(out.decode("utf-8", errors="replace"))
-                if proc.returncode == 0 and not is_err:
-                    summary, ok = parsed, True
-                else:
-                    err_txt = err.decode("utf-8", errors="replace").strip()[-400:]
-                    summary = parsed or err_txt or f"CLI saiu com código {proc.returncode}"
+        except subprocess.TimeoutExpired:
+            summary = f"passou do limite de {timeout // 60} minutos e foi cancelada"
         except Exception as e:
-            summary = f"falha ao executar o CLI: {e}"
+            summary = f"falha ao executar o CLI: {type(e).__name__}: {e}"
+        else:
+            parsed, is_err = parse_cli_output(out)
+            if rc == 0 and not is_err:
+                summary, ok = parsed, True
+            else:
+                summary = parsed or err.strip()[-400:] or f"CLI saiu com código {rc}"
 
         changed = diff_snapshot(before, snapshot_dir(folder))
         status = "ok" if ok else "FALHOU"
