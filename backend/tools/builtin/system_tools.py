@@ -195,16 +195,25 @@ def make_get_active_window() -> Tool:
 # ── open_file ──────────────────────────────────────────────────────────────────
 
 async def _open_file(path: str) -> str:
+    # Resolve aliases ("desktop/...") e caminhos relativos como as file_tools —
+    # caminho relativo cru falhava com WinError 2 (resolvia contra o cwd do
+    # backend). Caminhos absolutos fora do home (apps) continuam passando.
+    raw = (path or "").strip()
+    target = raw
+    if not raw.lower().startswith(("http://", "https://")):
+        from backend.tools.builtin.file_tools import _resolve_aliases, _safe_path
+        resolved = _safe_path(_resolve_aliases(raw))
+        target = str(resolved) if resolved is not None else _resolve_aliases(raw)
     try:
-        os.startfile(path)  # type: ignore[attr-defined]
-        return f"Abrindo: {path}"
+        os.startfile(target)  # type: ignore[attr-defined]
+        return f"Abrindo: {target}"
     except AttributeError:
         # Não-Windows
         import subprocess
-        subprocess.Popen(["xdg-open", path])
-        return f"Abrindo: {path}"
+        subprocess.Popen(["xdg-open", target])
+        return f"Abrindo: {target}"
     except Exception as e:
-        return f"[Erro] Não foi possível abrir '{path}': {e}"
+        return f"[Erro] Não foi possível abrir '{target}': {e}"
 
 
 def make_open_file() -> Tool:

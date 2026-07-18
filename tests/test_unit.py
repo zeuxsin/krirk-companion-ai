@@ -209,6 +209,13 @@ try:
 
     missing = asyncio.run(_read_file(str(HOME / "arquivo_que_nao_existe_xyz.txt")))
     check("read_file arquivo inexistente da erro claro", "não encontrado" in missing)
+
+    # open_file resolve aliases/relativos (WinError 2 com 'Desktop/...' cru)
+    from backend.tools.builtin.system_tools import _open_file
+    res_of = asyncio.run(_open_file("desktop/arquivo_inexistente_krirk_xyz.txt"))
+    check("open_file resolve caminho relativo p/ absoluto",
+          str(HOME / "Desktop" / "arquivo_inexistente_krirk_xyz.txt") in res_of)
+    check("open_file inexistente falha honestamente", res_of.startswith("[Erro]"))
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 
@@ -951,6 +958,9 @@ check("detecta 'Vou adicionar uns icones' (promessa)",
 check("detecta 'adicionei'", _claims_action("Pronto, adicionei o contador no app."))
 check("detecta 'atualizei'", _claims_action("Atualizei o arquivo com a barra de progresso."))
 check("detecta 'Reabre o app'", _claims_action("Tudo certo. Reabre o app pra ver como ficou."))
+check("detecta 'Vou criar uma interface visual...' (Persona 5)",
+      _claims_action("Beleza então. Vou criar uma interface visual inspirada no estilo Persona 5 pra você."))
+check("detecta 'vou preparar'", _claims_action("Vou preparar o sistema agora."))
 check("detecta 'O arquivo foi atualizado com...' (mentira sem tool, sem dois-pontos)",
       _claims_action("O arquivo foi atualizado com ícones simples e barra de progresso."))
 check("detecta 'foram adicionados'", _claims_action("Os ícones foram adicionados ao app."))
@@ -978,6 +988,44 @@ check("modificar arquivo usa GENERATE (le o disco), nunca LAST_RESPONSE",
       or "NEVER use" in orq_src and "<LAST_RESPONSE> to modify a file" in orq_src)
 check("arquivo no disco e a unica verdade p/ modificacao",
       "the file on disk is the only truth" in orq_src)
+
+# Aceite determinístico de oferta (o roteador flakeia; código não pode flakear)
+from backend.core.orchestrator import _is_acceptance, _pending_offer
+
+check("'Tudo isso' e aceite", _is_acceptance("Tudo isso"))
+check("'pode fazer' e aceite", _is_acceptance("pode fazer"))
+check("'Sim' e aceite", _is_acceptance("Sim"))
+check("'isso mesmo.' e aceite", _is_acceptance("isso mesmo."))
+check("'pode abrir pra eu ver' e aceite", _is_acceptance("pode abrir pra eu ver"))
+check("'beleza' e aceite", _is_acceptance("beleza"))
+check("'pode tentar de novo' e aceite", _is_acceptance("pode tentar de novo"))
+check("'nao precisa' NAO e aceite", not _is_acceptance("não precisa"))
+check("'acho que sim' NAO e aceite", not _is_acceptance("acho que sim"))
+check("'pode ser que chova amanha?' NAO e aceite", not _is_acceptance("pode ser que chova amanhã?"))
+check("opiniao longa NAO e aceite",
+      not _is_acceptance("Acho que todo tipo de ideia é relevante nesse projeto"))
+
+hist_oferta = [
+    {"role": "user", "content": "quero um estilo persona 5"},
+    {"role": "assistant", "content": "Beleza então. Vou criar uma interface visual estilo Persona 5. Quer que eu faça com cards e fundo escuro?"},
+]
+check("anuncio 'Vou criar...' e oferta pendente", _pending_offer(hist_oferta) is not None)
+hist_sem = [
+    {"role": "assistant", "content": "Quer que eu crie o arquivo? É só pedir."},
+    {"role": "user", "content": "hmm"},
+    {"role": "assistant", "content": "O dia tá bonito hoje."},
+]
+check("ultima msg sem oferta -> nada pendente (oferta velha nao conta)",
+      _pending_offer(hist_sem) is None)
+check("historico vazio -> sem oferta", _pending_offer([]) is None)
+check("'E so pedir' e marcador de oferta",
+      _pending_offer([{"role": "assistant", "content": "Posso criar a pasta. É só pedir."}]) is not None)
+
+check("re-roteamento forcado no fluxo (chat)", orq_src.count("OFERTA ACEITA] O usu") >= 2)
+check("aceite fura o filtro de small-talk", "and not accepted_offer" in orq_src)
+check("pos-delegacao tem prompt proprio (nao terminou)", "PROIBIDO dizer que" in orq_src)
+check("pos-delegacao tem override deterministico",
+      "alegava conclusão — substituída" in orq_src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

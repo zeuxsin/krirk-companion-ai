@@ -145,6 +145,49 @@ _TERMINAL_TOOLS = {
 }
 
 
+# Aceite determinístico de oferta: o roteador (modelo pequeno) falha com
+# frequência em mapear "sim"/"tudo isso"/"pode fazer" para a ação ofertada —
+# três casos reais em produção viraram alucinação de "já fiz". A detecção em
+# código elimina a dependência do LLM para reconhecer o aceite.
+_ACCEPTANCE_RE = re.compile(
+    r"^\s*(?:sim+|isso(?: mesmo| a[íi])?|tudo isso|exato|claro|ok(?:ay)?|beleza|"
+    r"bora|manda|faz|fa[çc]a|vai|demorou|com certeza|por favor|quero(?: sim)?|"
+    r"aceito|pode(?: fazer| sim| ser)?|"
+    r"pode (?:criar|abrir|salvar|mover|gerar|montar|preparar|come[çc]ar|tentar|mandar)(?: .{0,40})?)"
+    r"\s*[.!…]*\s*$",
+    re.IGNORECASE,
+)
+_OFFER_MARKERS_RE = re.compile(
+    r"(?:quer que eu|posso (?:criar|fazer|abrir|montar|preparar|gerar|adicionar|"
+    r"ajustar|mudar|organizar|tentar)|"
+    r"vou (?:criar|fazer|adicionar|montar|preparar|gerar|colocar|atualizar|"
+    r"ajustar|implementar|organizar)|"
+    r"[ée] s[óo] pedir|se quiser,? eu|tente de novo\?)",
+    re.IGNORECASE,
+)
+
+
+def _is_acceptance(message: str) -> bool:
+    """True para respostas curtas que aceitam uma oferta ('sim', 'tudo isso')."""
+    msg = (message or "").strip()
+    return len(msg) <= 60 and bool(_ACCEPTANCE_RE.match(msg))
+
+
+def _pending_offer(history: list | None) -> str | None:
+    """
+    Oferta pendente = a ÚLTIMA mensagem da assistente, se contiver marcador de
+    oferta/anúncio de ação. Mensagens mais antigas não contam (oferta antiga
+    já foi cumprida ou abandonada).
+    """
+    for m in reversed(history or []):
+        if m.get("role") == "assistant":
+            content = m.get("content", "") or ""
+            if _OFFER_MARKERS_RE.search(content):
+                return content
+            return None
+    return None
+
+
 # Alegações de ação que a Krirk NÃO pode fazer sem ferramenta executada —
 # usado como telemetria de honestidade (loga quando o modelo alucina ação)
 _ACTION_CLAIM_RE = re.compile(
@@ -158,6 +201,7 @@ _ACTION_CLAIM_RE = re.compile(
     r"est[áa] (?:salvo|criado|pronto) (?:em|na|no)\b|"
     # edições anunciadas/alegadas — "Vou adicionar ícones"/"Adicionado: ..." escaparam
     r"vou (?:adicionar|colocar|atualizar|ajustar|implementar|aplicar) |"
+    r"vou (?:criar|fazer|montar|preparar|gerar|construir|desenvolver|desenhar) |"
     r"vou (?:mudar|modificar) o |"
     r"adicionei|atualizei|ajustei|implementei|apliquei|"
     r"adicionad[oa]s?:|atualizad[oa]s?:|ajustad[oa]s?:|"
@@ -718,13 +762,27 @@ class Orchestrator:
         # ── FASE 1: Planner + loop de agente ──────────────────────────────────
         tool_result_context = ""
         executed_tools: list[tuple[str, str]] = []
-        skip_tools = _is_smalltalk(message)
+        accepted_offer = _pending_offer(history) if _is_acceptance(message) else None
+        skip_tools = _is_smalltalk(message) and not accepted_offer
         if skip_tools:
             print("[KRIRK][tools] Small-talk detectado — roteamento pulado")
         if self._tool_cfg.get("enabled", False) and self.tool_executor and not skip_tools:
             max_rounds = self._tool_cfg.get("max_rounds", 4)
 
             decision = await self._decide_tool(message, history)
+
+            # Rede determinística: aceite + oferta pendente + roteador disse
+            # none → re-roteia UMA vez com instrução inescapável (o modelo de
+            # roteamento flakeia nesse mapeamento com frequência)
+            if decision["type"] == "none" and accepted_offer:
+                print("[KRIRK][tools] Oferta aceita mas roteador disse none — forçando re-roteamento")
+                forced = (
+                    f'[OFERTA ACEITA] O usuário respondeu "{message.strip()[:60]}" aceitando '
+                    f'esta oferta da assistente: "{accepted_offer[:400]}". '
+                    "Execute AGORA a ação que foi ofertada (tool ou plan com todos os "
+                    "params). Responder none é INVÁLIDO."
+                )
+                decision = await self._decide_tool(forced, history)
 
             plan_attempted = False
             if decision["type"] == "plan":
@@ -891,7 +949,16 @@ class Orchestrator:
                 tool_name_used = "search_memory"
             else:
                 tool_name_used = executed_names[-1] if executed_names else ""
-            if tool_name_used in ("web_search", "search_memory"):
+            if tool_name_used == "delegate_code":
+                followup_instruction = (
+                    f"O usuário pediu: \"{message}\"\n"
+                    "A tarefa foi DELEGADA a um agente e está RODANDO EM SEGUNDO "
+                    "PLANO — ela AINDA NÃO TERMINOU e nenhum arquivo existe ainda. "
+                    "Diga de forma curta e natural que você começou a trabalhar "
+                    "nisso e que avisa assim que terminar. É PROIBIDO dizer que "
+                    "está pronto, feito, criado ou salvo."
+                )
+            elif tool_name_used in ("web_search", "search_memory"):
                 if tool_name_used == "web_search":
                     followup_instruction = (
                         f"O usuário pediu: \"{message}\"\n"
@@ -990,6 +1057,26 @@ class Orchestrator:
             except Exception as e:
                 print(f"[KRIRK][honestidade] Reescrita falhou: {e}")
 
+        # Pós-delegação: a tarefa está RODANDO — "Ficou pronto." aconteceu ao
+        # vivo (a guarda acima não pega porque a tool rodou com sucesso).
+        # Override determinístico: alegou conclusão ou nem mencionou o
+        # segundo plano → resposta substituída por uma honesta.
+        if executed_tools and executed_tools[-1][0] == "delegate_code" \
+                and executed_tools[-1][1].startswith("Tarefa delegada"):
+            low = clean_response.lower()
+            claims_done = re.search(
+                r"(?:ficou|est[áa]|t[áa])\s+pront|\bfeit[oa]\b|criei|criad[oa]\b|"
+                r"conclu[íi]|salvei|finalizei|entregue", low)
+            mentions_bg = re.search(
+                r"avis|segundo plano|rodando|trabalhando|come[çc]ei|em andamento|"
+                r"mandei fazer|deleguei", low)
+            if claims_done or not mentions_bg:
+                print("[KRIRK][honestidade] Resposta pós-delegação alegava conclusão — substituída")
+                clean_response = (
+                    "Comecei a trabalhar nisso agora — tá rodando em segundo plano. "
+                    "Te aviso assim que terminar."
+                )
+
         new_emotion = self.emotion.analyze_and_update(clean_response)
         self.memory.save_message(user_id, "assistant", clean_response, emotion=new_emotion)
         self.memory.update_intimacy(user_id, 0.1)
@@ -1059,8 +1146,20 @@ class Orchestrator:
 
         # ── Tool routing (planos com steps completos também executam) ─────────
         tool_result_context = ""
-        if self._tool_cfg.get("enabled", False) and self.tool_executor and not _is_smalltalk(message):
+        accepted_offer = _pending_offer(history) if _is_acceptance(message) else None
+        skip_tools = _is_smalltalk(message) and not accepted_offer
+        if self._tool_cfg.get("enabled", False) and self.tool_executor and not skip_tools:
             decision = await self._decide_tool(message, history)
+
+            if decision["type"] == "none" and accepted_offer:
+                print("[KRIRK][tools] Oferta aceita mas roteador disse none — forçando re-roteamento")
+                forced = (
+                    f'[OFERTA ACEITA] O usuário respondeu "{message.strip()[:60]}" aceitando '
+                    f'esta oferta da assistente: "{accepted_offer[:400]}". '
+                    "Execute AGORA a ação que foi ofertada (tool ou plan com todos os "
+                    "params). Responder none é INVÁLIDO."
+                )
+                decision = await self._decide_tool(forced, history)
 
             # Plano no coder: executa só os passos DICT (completos); sem re-roteamento
             payloads: list[dict] = []
