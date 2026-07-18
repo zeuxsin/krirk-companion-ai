@@ -153,15 +153,16 @@ _ACCEPTANCE_RE = re.compile(
     r"^\s*(?:sim+|isso(?: mesmo| a[íi])?|tudo isso|exato|claro|ok(?:ay)?|beleza|"
     r"bora|manda|faz|fa[çc]a|vai|demorou|com certeza|por favor|quero(?: sim)?|"
     r"aceito|pode(?: fazer| sim| ser)?|"
-    r"pode (?:criar|abrir|salvar|mover|gerar|montar|preparar|come[çc]ar|tentar|mandar)(?: .{0,40})?)"
+    r"pode (?:criar|abrir|salvar|mover|gerar|montar|preparar|come[çc]ar|tentar|"
+    r"mandar|mexer|melhorar|continuar|mudar)(?: .{0,40})?)"
     r"\s*[.!…]*\s*$",
     re.IGNORECASE,
 )
 _OFFER_MARKERS_RE = re.compile(
     r"(?:quer que eu|posso (?:criar|fazer|abrir|montar|preparar|gerar|adicionar|"
-    r"ajustar|mudar|organizar|tentar)|"
+    r"ajustar|mudar|organizar|tentar|mexer|melhorar)|"
     r"vou (?:criar|fazer|adicionar|montar|preparar|gerar|colocar|atualizar|"
-    r"ajustar|implementar|organizar)|"
+    r"ajustar|implementar|organizar|mexer|melhorar|polir|refinar)|"
     r"[ée] s[óo] pedir|se quiser,? eu|tente de novo\?)",
     re.IGNORECASE,
 )
@@ -202,6 +203,7 @@ _ACTION_CLAIM_RE = re.compile(
     # edições anunciadas/alegadas — "Vou adicionar ícones"/"Adicionado: ..." escaparam
     r"vou (?:adicionar|colocar|atualizar|ajustar|implementar|aplicar) |"
     r"vou (?:criar|fazer|montar|preparar|gerar|construir|desenvolver|desenhar) |"
+    r"vou (?:mexer|melhorar|polir|refinar|retocar) |"
     r"vou (?:mudar|modificar) o |"
     r"adicionei|atualizei|ajustei|implementei|apliquei|"
     r"adicionad[oa]s?:|atualizad[oa]s?:|ajustad[oa]s?:|"
@@ -539,6 +541,10 @@ class Orchestrator:
             "- If the user REQUESTS AN ACTION (lembrar, abrir, tocar, criar timer, salvar, "
             "pesquisar), you MUST pick the matching tool — 'none' there means the action "
             "silently never happens. Reserve 'none' for conversation, not for requests.\n"
+            "- POLITE QUESTION = REQUEST: 'tem como você...?', 'consegue...?', 'dá pra...?', "
+            "'você poderia...?' are ACTION REQUESTS in Portuguese, NOT questions about "
+            "capability. 'tem como dar uma melhorada na interface?' → delegate_code. "
+            "Never answer these with none.\n"
             "- get_time: ONLY when the user EXPLICITLY asks the current time or date "
             "('que horas são?', 'que dia é hoje?'). Questions about WELL-BEING or how the "
             "day is going ('como está?', 'como vai seu dia?', 'como está no dia de hoje?') "

@@ -999,6 +999,8 @@ check("'isso mesmo.' e aceite", _is_acceptance("isso mesmo."))
 check("'pode abrir pra eu ver' e aceite", _is_acceptance("pode abrir pra eu ver"))
 check("'beleza' e aceite", _is_acceptance("beleza"))
 check("'pode tentar de novo' e aceite", _is_acceptance("pode tentar de novo"))
+check("'pode mexer' e aceite", _is_acceptance("pode mexer"))
+check("'pode melhorar sim' e aceite", _is_acceptance("pode melhorar sim"))
 check("'nao precisa' NAO e aceite", not _is_acceptance("não precisa"))
 check("'acho que sim' NAO e aceite", not _is_acceptance("acho que sim"))
 check("'pode ser que chova amanha?' NAO e aceite", not _is_acceptance("pode ser que chova amanhã?"))
@@ -1010,6 +1012,12 @@ hist_oferta = [
     {"role": "assistant", "content": "Beleza então. Vou criar uma interface visual estilo Persona 5. Quer que eu faça com cards e fundo escuro?"},
 ]
 check("anuncio 'Vou criar...' e oferta pendente", _pending_offer(hist_oferta) is not None)
+hist_mexer = [{"role": "assistant", "content":
+               "Beleza então. Vou mexer no agenda_gui_persona5.py de novo pra deixar a "
+               "interface mais polida e funcional. Assim que terminar, aviso."}]
+check("anuncio 'Vou mexer...' e oferta pendente (caso real)", _pending_offer(hist_mexer) is not None)
+check("detecta 'Vou mexer no arquivo' como alegacao",
+      _claims_action("Vou mexer no agenda_gui_persona5.py de novo pra deixar a interface mais polida."))
 hist_sem = [
     {"role": "assistant", "content": "Quer que eu crie o arquivo? É só pedir."},
     {"role": "user", "content": "hmm"},
@@ -1026,6 +1034,7 @@ check("aceite fura o filtro de small-talk", "and not accepted_offer" in orq_src)
 check("pos-delegacao tem prompt proprio (nao terminou)", "PROIBIDO dizer que" in orq_src)
 check("pos-delegacao tem override deterministico",
       "alegava conclusão — substituída" in orq_src)
+check("pergunta educada e pedido de acao", "POLITE QUESTION = REQUEST" in orq_src)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
