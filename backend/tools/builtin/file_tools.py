@@ -26,6 +26,31 @@ _PATH_ALIASES: dict[str, Path] = {
 }
 
 
+# Pastas EXTRAS liberadas via config (tools.allowed_dirs) — além do home.
+# Cada uma vira alias pelo nome ("calendario" → C:\calendario).
+_EXTRA_DIRS: list[Path] = []
+_EXTRA_ALIASES: list[str] = []
+
+
+def set_allowed_dirs(dirs: list[str]) -> None:
+    """Configura pastas extras permitidas (chamado no boot pelo registry)."""
+    global _EXTRA_DIRS
+    for alias in _EXTRA_ALIASES:
+        _PATH_ALIASES.pop(alias, None)
+    _EXTRA_ALIASES.clear()
+    _EXTRA_DIRS = []
+    for d in dirs or []:
+        try:
+            p = Path(d).resolve()
+        except OSError:
+            continue
+        _EXTRA_DIRS.append(p)
+        alias = p.name.lower()
+        if alias and alias not in _PATH_ALIASES:
+            _PATH_ALIASES[alias] = p
+            _EXTRA_ALIASES.append(alias)
+
+
 def _resolve_aliases(path_str: str) -> str:
     """Resolve atalhos de caminho como 'Desktop' ou 'Área de Trabalho'."""
     key = path_str.strip().lower()
@@ -53,6 +78,9 @@ def _safe_path(path_str: str) -> Path | None:
         p = p.resolve()
         if p.is_relative_to(_HOME):
             return p
+        for extra in _EXTRA_DIRS:
+            if p.is_relative_to(extra):
+                return p
         return None
     except Exception:
         return None

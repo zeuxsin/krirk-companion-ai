@@ -108,6 +108,11 @@ tools:
   tool_model: "qwen2.5-coder:7b"   # modelo especializado para roteamento de ferramentas
   max_rounds: 4
   timeout_seconds: 10
+  # Pastas EXTRAS que as ferramentas de arquivo podem acessar (além do home).
+  # Cada uma vira alias pelo nome da pasta ("calendario" → C:\calendario).
+  allowed_dirs:
+    - "C:/calendario"        # Phantom System — agenda gamificada do usuário
+  calendar_dir: "C:/calendario"   # ponte add_calendar_task/list_calendar_tasks
   whitelist:
     - get_time
     - run_powershell
@@ -152,6 +157,9 @@ tools:
     # ── Fase 5: memória de longo prazo ──
     - search_history   # busca conversas por período ("o que falamos semana passada")
     - remember_this    # memoriza permanentemente ("lembra disso")
+    # ── Agenda real: Phantom System (C:\calendario) ──
+    - add_calendar_task    # coloca tarefa/compromisso na agenda gamificada
+    - list_calendar_tasks  # lista o que a Krirk já adicionou
     # ── Interioridade: memes internos / cultura compartilhada ──
     - coin_term        # cunha um bordão/gíria interno de vocês dois
     - search_meme      # busca significado de meme/gíria na internet

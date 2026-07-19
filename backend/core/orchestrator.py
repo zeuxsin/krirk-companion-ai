@@ -137,8 +137,8 @@ def _resolve_last_response(params: dict, history: list[dict]) -> dict:
 # a mesma agenda 3x até alucinar o dia errado. Encadeamentos multi-ação
 # legítimos usam o PLANO (todas as etapas decididas de uma vez).
 _TERMINAL_TOOLS = {
-    "write_file", "delegate_code", "open_url", "open_app", "open_file",
-    "set_timer", "remember_this", "coin_term", "set_brain_state", "type_text",
+    "write_file", "delegate_code", "add_calendar_task", "open_url", "open_app",
+    "open_file", "set_timer", "remember_this", "coin_term", "set_brain_state", "type_text",
     "press_hotkey", "focus_window", "set_volume", "mute_volume",
     "media_play_pause", "media_next", "media_prev", "set_clipboard",
     "browser_open", "browser_click", "browser_fill", "browser_close",
@@ -587,12 +587,24 @@ class Orchestrator:
             "unless the user used those exact words.\n"
             "- execute_python: only when the user explicitly asks to RUN/test code, or for "
             "genuinely heavy computation. Simple math ('quanto é 15% de 230?') → none.\n"
+            "- add_calendar_task (when listed): the user's REAL agenda is the Phantom "
+            "System app. ANY task/appointment with a DATE ('coloca na agenda', 'adiciona "
+            "tarefa', 'tenho dentista quarta às 14h', 'marca pra segunda') → "
+            '{"tool": "add_calendar_task", "params": {"titulo": "Dentista 14h", '
+            '"data": "quarta"}}. Pass data EXACTLY as the user said (hoje/amanhã/quarta/'
+            "próxima sexta/15/08) — the tool resolves the real date; NEVER compute "
+            "weekdays yourself. Time goes inside titulo. Optional params: xp, gold, "
+            "atributo (for/int/agi/dis/cri). Do NOT use write_file or remember_this "
+            "for agenda items.\n"
+            "- list_calendar_tasks: when the user asks what you added to the agenda.\n"
             "- 'me lembra' DISAMBIGUATION — these are ACTION requests, never 'none':\n"
             '  "me lembra de tomar água daqui a 15 minutos" → '
             '{"tool": "set_timer", "params": {"minutes": "15", "label": "tomar água"}}\n'
             '  "lembra que meu aniversário é 10 de março" → '
             '{"tool": "remember_this", "params": {"fact": "aniversário do usuário é 10 de março"}}\n'
-            "  Rule: WITH duration → set_timer; permanent fact WITHOUT duration → remember_this.\n"
+            '  "me lembra que quinta tenho prova" → add_calendar_task (data: "quinta")\n'
+            "  Rule: WITH duration → set_timer; task/appointment WITH DATE → "
+            "add_calendar_task; permanent fact → remember_this.\n"
             "- set_volume/mute_volume/media_*: only for SYSTEM audio or media players. "
             "'fica quieta', 'silêncio', 'fala menos' are directed at YOU (the assistant) → none.\n"
             "- search_memory: the user's profile (name, job, interests) is ALREADY in context — "

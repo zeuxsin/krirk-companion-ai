@@ -45,6 +45,13 @@ def build_default_registry(config: dict, memory=None, router=None, orchestrator=
     whitelist: list[str] = config.get("whitelist", [])
     registry = ToolRegistry()
 
+    # Pastas extras liberadas no sandbox de arquivos (ex: C:\calendario)
+    try:
+        from backend.tools.builtin.file_tools import set_allowed_dirs
+        set_allowed_dirs(config.get("allowed_dirs", []))
+    except Exception as e:
+        print(f"[KRIRK][tools] Erro ao configurar allowed_dirs: {e}")
+
     # ── Tools do sistema ──────────────────────────────────────────────────────
     try:
         from backend.tools.builtin.system_tools import (
@@ -118,6 +125,21 @@ def build_default_registry(config: dict, memory=None, router=None, orchestrator=
                 registry.register(factory())
     except Exception as e:
         print(f"[KRIRK][tools] Erro ao carregar media_tools: {e}")
+
+    # ── Ponte com o Phantom System (agenda gamificada em C:\calendario) ──────
+    cal_dir = config.get("calendar_dir")
+    if cal_dir:
+        try:
+            from backend.tools.builtin.calendar_tools import (
+                make_add_calendar_task,
+                make_list_calendar_tasks,
+            )
+            if "add_calendar_task" in whitelist:
+                registry.register(make_add_calendar_task(cal_dir))
+            if "list_calendar_tasks" in whitelist:
+                registry.register(make_list_calendar_tasks(cal_dir))
+        except Exception as e:
+            print(f"[KRIRK][tools] Erro ao carregar calendar_tools: {e}")
 
     # ── Tools de busca web ────────────────────────────────────────────────────
     try:

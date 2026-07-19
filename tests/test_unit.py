@@ -1304,6 +1304,78 @@ check("pasta fora do home da erro",
       asyncio.run(cc_tool.func(task="fazer x", folder="C:\\Windows")).startswith("[Erro]"))
 
 check("delegate_code e terminal", "delegate_code" in _TERMINAL_TOOLS)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 25. Agenda Phantom System (C:\calendario)
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("25. Agenda Phantom System")
+
+from datetime import date as _date
+from backend.tools.builtin.calendar_tools import (
+    resolve_date, read_inbox, write_inbox, make_add_calendar_task,
+)
+
+# sexta-feira, 17/07/2026 como referência fixa
+_ref = _date(2026, 7, 17)
+check("data: hoje", resolve_date("hoje", _ref) == "2026-07-17")
+check("data: amanha", resolve_date("amanhã", _ref) == "2026-07-18")
+check("data: depois de amanha", resolve_date("depois de amanhã", _ref) == "2026-07-19")
+check("data: quarta (proxima ocorrencia)", resolve_date("quarta", _ref) == "2026-07-22")
+check("data: na quarta", resolve_date("na quarta", _ref) == "2026-07-22")
+check("data: sexta = hoje (mesmo dia conta)", resolve_date("sexta", _ref) == "2026-07-17")
+check("data: proxima sexta pula pra semana que vem", resolve_date("próxima sexta", _ref) == "2026-07-24")
+check("data: quarta-feira com sufixo", resolve_date("quarta-feira", _ref) == "2026-07-22")
+check("data: DD/MM futuro", resolve_date("15/08", _ref) == "2026-08-15")
+check("data: DD/MM que ja passou vai pro ano seguinte", resolve_date("10/03", _ref) == "2027-03-10")
+check("data: DD/MM/YYYY", resolve_date("25/12/2026", _ref) == "2026-12-25")
+check("data: ISO passa direto", resolve_date("2026-09-01", _ref) == "2026-09-01")
+check("data: lixo -> None", resolve_date("sei la quando", _ref) is None)
+check("data: vazio -> None", resolve_date("", _ref) is None)
+
+# Inbox: roundtrip com wrapper JS
+_caltmp = Path(tempfile.mkdtemp(prefix="krirk_cal_"))
+try:
+    _inbox_file = _caltmp / "dados" / "krirk_inbox.js"
+    write_inbox(_inbox_file, [{"id": "krirk-1", "title": "Teste", "date": "2026-07-20"}])
+    _inbox_txt = _inbox_file.read_text(encoding="utf-8")
+    check("inbox: wrapper JS presente", _inbox_txt.startswith("window.KRIRK_INBOX = "))
+    _back = read_inbox(_inbox_file)
+    check("inbox: roundtrip preserva entrada", _back and _back[0]["title"] == "Teste")
+    check("inbox: arquivo inexistente -> []", read_inbox(_caltmp / "nao_existe.js") == [])
+
+    # Tool add_calendar_task de ponta a ponta (pasta temporária)
+    _tool_cal = make_add_calendar_task(str(_caltmp))
+    _res_cal = asyncio.run(_tool_cal.func(titulo="Psicóloga 13:30", data="quarta"))
+    check("tool: adiciona e confirma com data resolvida", "Psicóloga 13:30" in _res_cal and "quarta" in _res_cal)
+    _entries = read_inbox(_caltmp / "dados" / "krirk_inbox.js")
+    check("tool: entrada gravada no inbox (preserva as anteriores)",
+          len(_entries) == 2 and _entries[-1]["title"] == "Psicóloga 13:30")
+    check("tool: id unico com prefixo krirk-", _entries[-1]["id"].startswith("krirk-"))
+    _res_cal2 = asyncio.run(_tool_cal.func(titulo="Outra", data="data impossivel"))
+    check("tool: data invalida da erro claro", _res_cal2.startswith("[Erro]"))
+    _res_cal3 = asyncio.run(_tool_cal.func(titulo="", data="hoje"))
+    check("tool: titulo vazio da erro", _res_cal3.startswith("[Erro]"))
+finally:
+    shutil.rmtree(_caltmp, ignore_errors=True)
+
+# Sandbox estendido: allowed_dirs
+from backend.tools.builtin.file_tools import set_allowed_dirs
+set_allowed_dirs(["C:/calendario"])
+check("allowed_dir: caminho dentro aceito", _safe_path("C:\\calendario\\dados\\krirk_inbox.js") is not None)
+check("allowed_dir: alias pelo nome da pasta",
+      _safe_path(_resolve_aliases("calendario/dados/krirk_inbox.js")) is not None)
+check("allowed_dir: C:\\Windows continua bloqueado", _safe_path("C:\\Windows\\System32") is None)
+check("allowed_dir: traversal para fora bloqueado", _safe_path("C:\\calendario\\..\\Windows") is None)
+set_allowed_dirs([])
+check("allowed_dir: reset remove acesso", _safe_path("C:\\calendario\\dados\\krirk_inbox.js") is None)
+check("allowed_dir: reset remove alias", _resolve_aliases("calendario") == "calendario")
+set_allowed_dirs(["C:/calendario"])  # estado de produção
+
+check("add_calendar_task e terminal", "add_calendar_task" in _TERMINAL_TOOLS)
+check("roteador conhece a agenda Phantom System", "Phantom" in orq_src and "add_calendar_task" in orq_src)
+check("roteador nao calcula dia da semana", "NEVER compute" in orq_src)
 check("roteador prioriza delegate_code p/ codigo", "FIRST CHOICE for real coding" in orq_src)
 app_src = (Path(__file__).parent.parent / "backend" / "api" / "app.py").read_text(encoding="utf-8")
 check("app.py registra delegate_code quando habilitada", "make_delegate_code" in app_src)
