@@ -113,6 +113,8 @@ tools:
   allowed_dirs:
     - "C:/calendario"        # Phantom System — agenda gamificada do usuário
   calendar_dir: "C:/calendario"   # ponte add_calendar_task/list_calendar_tasks
+  calendar_api: "http://127.0.0.1:8123"   # server.py do Phantom System (SSE ao vivo);
+                                          # fora do ar → fallback dados/krirk_inbox.js
   whitelist:
     - get_time
     - run_powershell

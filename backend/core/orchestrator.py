@@ -590,11 +590,17 @@ class Orchestrator:
             "- add_calendar_task (when listed): the user's REAL agenda is the Phantom "
             "System app. ANY task/appointment with a DATE ('coloca na agenda', 'adiciona "
             "tarefa', 'tenho dentista quarta às 14h', 'marca pra segunda') → "
-            '{"tool": "add_calendar_task", "params": {"titulo": "Dentista 14h", '
-            '"data": "quarta"}}. Pass data EXACTLY as the user said (hoje/amanhã/quarta/'
-            "próxima sexta/15/08) — the tool resolves the real date; NEVER compute "
-            "weekdays yourself. Time goes inside titulo. Optional params: xp, gold, "
-            "atributo (for/int/agi/dis/cri). Do NOT use write_file or remember_this "
+            '{"tool": "add_calendar_task", "params": {"titulo": "Dentista", '
+            '"data": "quarta", "hora": "14:00", "tipo": "compromisso"}}. '
+            "Pass data EXACTLY as the user said (hoje/amanhã/quarta/próxima sexta/15/08) "
+            "— the tool resolves the real date; NEVER compute weekdays yourself. "
+            "hora is a SEPARATE param (HH:MM), never inside titulo — include it ONLY "
+            "when the CURRENT message states a time; NEVER carry a time over from "
+            "earlier messages. "
+            "tipo: 'compromisso' = attending something (consulta, reunião, evento); "
+            "'tarefa' = producing something (estudar, fazer, escrever). "
+            "Optional: xp, gold, atributo (for/int/agi/dis/cri), boss (link to a "
+            "big goal the user names). Do NOT use write_file or remember_this "
             "for agenda items.\n"
             "- list_calendar_tasks: when the user asks what you added to the agenda.\n"
             "- 'me lembra' DISAMBIGUATION — these are ACTION requests, never 'none':\n"

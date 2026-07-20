@@ -1315,6 +1315,7 @@ section("25. Agenda Phantom System")
 from datetime import date as _date
 from backend.tools.builtin.calendar_tools import (
     resolve_date, read_inbox, write_inbox, make_add_calendar_task,
+    norm_hora, norm_tipo,
 )
 
 # sexta-feira, 17/07/2026 como referência fixa
@@ -1345,18 +1346,70 @@ try:
     check("inbox: roundtrip preserva entrada", _back and _back[0]["title"] == "Teste")
     check("inbox: arquivo inexistente -> []", read_inbox(_caltmp / "nao_existe.js") == [])
 
-    # Tool add_calendar_task de ponta a ponta (pasta temporária)
-    _tool_cal = make_add_calendar_task(str(_caltmp))
-    _res_cal = asyncio.run(_tool_cal.func(titulo="Psicóloga 13:30", data="quarta"))
-    check("tool: adiciona e confirma com data resolvida", "Psicóloga 13:30" in _res_cal and "quarta" in _res_cal)
+    # Normalização de hora e tipo (API nova do server.py)
+    check("hora: '14h' vira 14:00", norm_hora("14h") == "14:00")
+    check("hora: '13:30' passa", norm_hora("13:30") == "13:30")
+    check("hora: '14h30' vira 14:30", norm_hora("14h30") == "14:30")
+    check("hora: '9' vira 09:00", norm_hora("9") == "09:00")
+    check("hora: vazio fica vazio", norm_hora("") == "")
+    check("hora: '25h' invalida", norm_hora("25h") == "")
+    check("hora: lixo fica vazio", norm_hora("de tarde") == "")
+    check("tipo: consulta e compromisso", norm_tipo("consulta") == "compromisso")
+    check("tipo: reuniao e compromisso", norm_tipo("reunião") == "compromisso")
+    check("tipo: padrao e tarefa", norm_tipo("") == "tarefa" and norm_tipo("tarefa") == "tarefa")
+
+    # Fallback de ARQUIVO (API fora do ar: porta 1 nunca responde)
+    _tool_cal = make_add_calendar_task(str(_caltmp), "http://127.0.0.1:1")
+    _res_cal = asyncio.run(_tool_cal.func(titulo="Psicóloga", data="quarta", hora="13:30", tipo="consulta"))
+    check("fallback: confirma com data resolvida e fila", "Psicóloga" in _res_cal and "quarta" in _res_cal
+          and "servidor do calendário está desligado" in _res_cal)
     _entries = read_inbox(_caltmp / "dados" / "krirk_inbox.js")
-    check("tool: entrada gravada no inbox (preserva as anteriores)",
+    check("fallback: entrada gravada (preserva anteriores)",
           len(_entries) == 2 and _entries[-1]["title"] == "Psicóloga 13:30")
-    check("tool: id unico com prefixo krirk-", _entries[-1]["id"].startswith("krirk-"))
+    check("fallback: hora embutida no titulo (ponte velha nao tem campo hora)",
+          "13:30" in _entries[-1]["title"])
+    check("fallback: compromisso usa padrao 10 XP", _entries[-1]["xp"] == 10)
+    check("fallback: id unico com prefixo krirk-", _entries[-1]["id"].startswith("krirk-"))
     _res_cal2 = asyncio.run(_tool_cal.func(titulo="Outra", data="data impossivel"))
     check("tool: data invalida da erro claro", _res_cal2.startswith("[Erro]"))
     _res_cal3 = asyncio.run(_tool_cal.func(titulo="", data="hoje"))
     check("tool: titulo vazio da erro", _res_cal3.startswith("[Erro]"))
+
+    # Caminho da API: servidor fake local captura o POST
+    import http.server as _hs
+    import threading as _th
+    import json as _json_cal
+    _captured = {}
+
+    class _FakeInbox(_hs.BaseHTTPRequestHandler):
+        def do_POST(self):
+            ln = int(self.headers.get("Content-Length") or 0)
+            _captured["payload"] = _json_cal.loads(self.rfile.read(ln))
+            body = b'{"ok": true, "recebidos": 1, "ids": ["x"]}'
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    _fsrv = _hs.HTTPServer(("127.0.0.1", 0), _FakeInbox)
+    _fthr = _th.Thread(target=_fsrv.serve_forever, daemon=True)
+    _fthr.start()
+    try:
+        _tool_api = make_add_calendar_task(str(_caltmp), f"http://127.0.0.1:{_fsrv.server_address[1]}")
+        _res_api = asyncio.run(_tool_api.func(
+            titulo="Dentista", data="amanhã", hora="14h", tipo="consulta", boss="Saúde em dia"))
+        check("API: resposta diz que ja apareceu na tela", "apareceu na tela" in _res_api)
+        check("API: hora separada e normalizada", _captured["payload"]["hora"] == "14:00")
+        check("API: tipo normalizado p/ compromisso", _captured["payload"]["tipo"] == "compromisso")
+        check("API: xp padrao de compromisso", _captured["payload"]["xp"] == 10)
+        check("API: boss vai no payload", _captured["payload"]["boss"] == "Saúde em dia")
+        check("API: titulo sem horario embutido", _captured["payload"]["titulo"] == "Dentista")
+    finally:
+        _fsrv.shutdown()
 finally:
     shutil.rmtree(_caltmp, ignore_errors=True)
 

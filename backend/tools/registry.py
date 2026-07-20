@@ -129,15 +129,16 @@ def build_default_registry(config: dict, memory=None, router=None, orchestrator=
     # ── Ponte com o Phantom System (agenda gamificada em C:\calendario) ──────
     cal_dir = config.get("calendar_dir")
     if cal_dir:
+        cal_api = config.get("calendar_api", "http://127.0.0.1:8123")
         try:
             from backend.tools.builtin.calendar_tools import (
                 make_add_calendar_task,
                 make_list_calendar_tasks,
             )
             if "add_calendar_task" in whitelist:
-                registry.register(make_add_calendar_task(cal_dir))
+                registry.register(make_add_calendar_task(cal_dir, cal_api))
             if "list_calendar_tasks" in whitelist:
-                registry.register(make_list_calendar_tasks(cal_dir))
+                registry.register(make_list_calendar_tasks(cal_dir, cal_api))
         except Exception as e:
             print(f"[KRIRK][tools] Erro ao carregar calendar_tools: {e}")
 

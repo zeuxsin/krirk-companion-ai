@@ -143,14 +143,18 @@ orgulhosa, determinada, codando, jogando, tranquila`
   Config: `claude_code:` (model sonnet, timeout 600s, max_turns 30).
   Roteador prioriza p/ código real; `write_file+<GENERATE>` vira fallback.
 - **Agenda real (Phantom System)**: o calendário gamificado do usuário vive em
-  `C:\calendario` (app web standalone, save em localStorage — a Krirk NÃO
-  escreve no save). Ponte: `add_calendar_task`/`list_calendar_tasks`
-  (`calendar_tools.py`) escrevem em `C:\calendario\dados\krirk_inbox.js` e o
-  app importa cada entrada uma vez no boot (`mergeKrirkInbox()` no app.js;
-  ids importados em `S.krirkImported`). Datas resolvidas DETERMINISTICAMENTE
-  em Python (`resolve_date`: hoje/amanhã/dia da semana/DD/MM/ISO) — nunca
-  pelo LLM. Sandbox: `tools.allowed_dirs` no config libera pastas extras no
-  `_safe_path` (cada uma vira alias pelo nome da pasta).
+  `C:\calendario` (app web + `server.py` local em http://127.0.0.1:8123;
+  save em localStorage — a Krirk NÃO escreve no save). Ponte
+  `add_calendar_task`/`list_calendar_tasks` (`calendar_tools.py`), DOIS
+  caminhos: (1) POST /api/inbox no server.py — campos ricos (hora separada,
+  tipo tarefa/compromisso com XP próprio, boss por nome) e a tela atualiza
+  na hora via SSE; (2) fallback `dados\krirk_inbox.js` quando o servidor
+  está desligado (app importa no boot via `mergeKrirkInbox()`; hora vai
+  embutida no título — a ponte velha não tem o campo). Datas resolvidas
+  DETERMINISTICAMENTE em Python (`resolve_date`) e hora normalizada
+  (`norm_hora`: "14h"→"14:00") — nunca pelo LLM. Config:
+  `tools.calendar_dir` + `tools.calendar_api`. Sandbox: `tools.allowed_dirs`
+  libera pastas extras no `_safe_path` (alias pelo nome da pasta).
 - **Plugins (Fase 6)**: `plugins/*.py` com `register(registry)` são carregados no
   boot (config `plugins.enabled`). NÃO passam pela whitelist. Erros isolados
   por plugin. Exemplo: `plugins/exemplo_dado.py` (roll_dice).
