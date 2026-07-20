@@ -204,16 +204,23 @@ def make_add_calendar_task(calendar_dir: str, api_base: str) -> Tool:
                     f"'{titulo}' em {quando}, {xp_i} XP / {gold_i} G{extra}. "
                     "Se o app estiver aberto, já apareceu na tela.")
 
-        # 2) Fallback: ponte de arquivo (app importa no próximo boot)
+        # 2) Fallback: ponte de arquivo (app importa no próximo boot).
+        # Mesmas chaves PT da API — o mergeKrirkInbox entende; hora tem campo
+        # próprio (nunca no título).
         entries = read_inbox(inbox)
-        entries.append({
+        entry = {
             "id": f"krirk-{int(time.time() * 1000)}",
-            "title": (titulo + (f" {hora_n}" if hora_n else ""))[:120],
-            "date": resolved,
-            "attr": attr,
+            "titulo": titulo[:120],
+            "data": resolved,
+            "hora": hora_n,
+            "tipo": tipo_n,
+            "atributo": attr,
             "xp": xp_i,
             "gold": gold_i,
-        })
+        }
+        if (boss or "").strip():
+            entry["boss"] = boss.strip()[:60]
+        entries.append(entry)
         try:
             write_inbox(inbox, entries)
         except OSError as e:
@@ -266,7 +273,11 @@ def make_list_calendar_tasks(calendar_dir: str, api_base: str) -> Tool:
             quando = e.get("data", "?") + (f" {e['hora']}" if e.get("hora") else "")
             lines.append(f"- {quando}: {e.get('titulo', '?')} ({e.get('xp', '?')} XP)")
         for e in file_items[-20:]:
-            lines.append(f"- {e.get('date', '?')}: {e.get('title', '?')} ({e.get('xp', '?')} XP)")
+            quando = (e.get("data") or e.get("date") or "?")
+            if e.get("hora"):
+                quando += f" {e['hora']}"
+            nome = e.get("titulo") or e.get("title") or "?"
+            lines.append(f"- {quando}: {nome} ({e.get('xp', '?')} XP)")
         return ("Na fila da agenda (entram no app aberto/próxima abertura):\n"
                 + "\n".join(lines))
 

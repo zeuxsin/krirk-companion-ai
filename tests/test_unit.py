@@ -1365,9 +1365,10 @@ try:
           and "servidor do calendário está desligado" in _res_cal)
     _entries = read_inbox(_caltmp / "dados" / "krirk_inbox.js")
     check("fallback: entrada gravada (preserva anteriores)",
-          len(_entries) == 2 and _entries[-1]["title"] == "Psicóloga 13:30")
-    check("fallback: hora embutida no titulo (ponte velha nao tem campo hora)",
-          "13:30" in _entries[-1]["title"])
+          len(_entries) == 2 and _entries[-1]["titulo"] == "Psicóloga")
+    check("fallback: hora em campo PROPRIO, titulo limpo",
+          _entries[-1]["hora"] == "13:30" and "13:30" not in _entries[-1]["titulo"])
+    check("fallback: tipo gravado", _entries[-1]["tipo"] == "compromisso")
     check("fallback: compromisso usa padrao 10 XP", _entries[-1]["xp"] == 10)
     check("fallback: id unico com prefixo krirk-", _entries[-1]["id"].startswith("krirk-"))
     _res_cal2 = asyncio.run(_tool_cal.func(titulo="Outra", data="data impossivel"))
