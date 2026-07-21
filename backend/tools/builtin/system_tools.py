@@ -13,27 +13,32 @@ from backend.tools.base import Tool, ToolParam
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _run_ps_blocking(command: str, timeout: float) -> tuple[str, str]:
+    """PowerShell BLOQUEANTE (via asyncio.to_thread). asyncio subprocess não
+    funciona sob o uvicorn no Windows (SelectorEventLoop → NotImplementedError
+    com mensagem vazia, que virava um '[Erro]' pelado)."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    p = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive",
+         "-ExecutionPolicy", "Bypass", "-Command", command],
+        capture_output=True, timeout=timeout, creationflags=flags,
+    )
+    return (p.stdout.decode("utf-8", errors="replace").strip(),
+            p.stderr.decode("utf-8", errors="replace").strip())
+
+
 async def _run_ps(command: str, timeout: float = 8.0) -> str:
     """Executa um comando PowerShell e retorna stdout + stderr (max 2000 chars)."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "powershell", "-NoProfile", "-NonInteractive",
-            "-ExecutionPolicy", "Bypass",
-            "-Command", command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        out = stdout.decode("utf-8", errors="replace").strip()
-        err = stderr.decode("utf-8", errors="replace").strip()
-        result = out
-        if err:
-            result += f"\n[stderr] {err}"
-        return result[:2000] if result else "(sem saída)"
-    except asyncio.TimeoutError:
+        out, err = await asyncio.to_thread(_run_ps_blocking, command, timeout)
+    except subprocess.TimeoutExpired:
         return "[Erro] Timeout ao executar PowerShell."
     except Exception as e:
-        return f"[Erro] {e}"
+        return f"[Erro] {type(e).__name__}: {e}"
+    result = out
+    if err:
+        result += f"\n[stderr] {err}"
+    return result[:2000] if result else "(sem saída)"
 
 
 # ── run_powershell ─────────────────────────────────────────────────────────────

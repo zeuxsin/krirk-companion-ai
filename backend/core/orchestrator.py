@@ -542,8 +542,14 @@ class Orchestrator:
             "'Documents/...') or absolute ('C:/Users/...'). NEVER a bare name like "
             "'minha_pasta' — find the real location in Recent conversation. "
             'Example: {"path": "Desktop/agenda_e_recompensas/agenda_gui.py"}\n'
-            "- ORGANIZE FILES ('coloca numa pasta', 'move para X'): use create_folder and "
-            "move_file — a plan when there are multiple items. Not run_powershell.\n"
+            "- MOVE/ORGANIZE FILES ('move X pra pasta Y', 'coloca numa pasta'): ALWAYS use "
+            "move_file (and create_folder if the target folder is new). NEVER use "
+            "run_powershell / Move-Item for moving or copying files — move_file is the "
+            "only correct tool. Example moving one file into a new subfolder: "
+            '{"plan": [{"tool": "create_folder", "params": {"path": '
+            '"C:/Krirk_AI/KRIRK/Krirk Code/tetris"}}, {"tool": "move_file", "params": '
+            '{"source": "C:/Krirk_AI/KRIRK/Krirk Code/tetris.py", "destination": '
+            '"C:/Krirk_AI/KRIRK/Krirk Code/tetris"}}]}\n'
             "- If the user REQUESTS AN ACTION (lembrar, abrir, tocar, criar timer, salvar, "
             "pesquisar), you MUST pick the matching tool — 'none' there means the action "
             "silently never happens. Reserve 'none' for conversation, not for requests.\n"

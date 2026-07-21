@@ -216,6 +216,25 @@ try:
     check("open_file resolve caminho relativo p/ absoluto",
           str(HOME / "Desktop" / "arquivo_inexistente_krirk_xyz.txt") in res_of)
     check("open_file inexistente falha honestamente", res_of.startswith("[Erro]"))
+
+    # run_powershell e execute_python REAIS (subprocess.run via to_thread —
+    # NAO asyncio subprocess, que quebra sob o uvicorn/SelectorEventLoop)
+    from backend.tools.builtin.system_tools import _run_powershell
+    from backend.tools.builtin.code_tools import _run_python
+    ps_out = asyncio.run(_run_powershell("Write-Output 'krirk_ps_ok'"))
+    check("run_powershell roda de verdade (nao [Erro] vazio)", "krirk_ps_ok" in ps_out)
+    check("run_powershell NAO retorna [Erro] pelado", not ps_out.startswith("[Erro]"))
+    py_out = asyncio.run(_run_python("print('krirk_py_ok')"))
+    check("execute_python roda de verdade", "krirk_py_ok" in py_out)
+    py_err = asyncio.run(_run_python("raise ValueError('xyz')"))
+    check("execute_python captura erro do codigo", "ValueError" in py_err)
+    # os dois usam subprocess.run em thread (nao asyncio subprocess)
+    sys_src = (Path(__file__).parent.parent / "backend" / "tools" / "builtin" / "system_tools.py").read_text(encoding="utf-8")
+    code_src = (Path(__file__).parent.parent / "backend" / "tools" / "builtin" / "code_tools.py").read_text(encoding="utf-8")
+    check("run_powershell usa to_thread (nao create_subprocess)",
+          "asyncio.to_thread" in sys_src and "create_subprocess_exec" not in sys_src)
+    check("execute_python usa to_thread (nao create_subprocess)",
+          "asyncio.to_thread" in code_src and "create_subprocess_exec" not in code_src)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 
@@ -1310,6 +1329,14 @@ check("pasta fora do home/allowed da erro",
       asyncio.run(cc_tool.func(task="fazer x", folder="C:\\Windows")).startswith("[Erro]"))
 
 check("delegate_code e terminal", "delegate_code" in _TERMINAL_TOOLS)
+
+# Roteador: mover arquivo usa move_file, nunca run_powershell/Move-Item
+check("regra: mover arquivo usa move_file, nao run_powershell",
+      "NEVER use \n            \"run_powershell".replace("\n            ", "") in orq_src.replace("\r\n", "\n")
+      or ("move_file is the" in orq_src and "NEVER use" in orq_src))
+check("regra tem exemplo com source/destination", '"source":' in orq_src and '"destination":' in orq_src)
+check("main.py vigia so backend no reload (nao Krirk Code/data)",
+      'reload_dirs=["backend"]' in (Path(__file__).parent.parent / "main.py").read_text(encoding="utf-8"))
 
 # Roteador "route": Cerebras (gemma-4-31b) primeiro, resto como rede
 from backend.providers.router import TASK_MODELS as _TM, TASK_FALLBACK as _TF

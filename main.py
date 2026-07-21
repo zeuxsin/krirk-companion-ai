@@ -56,6 +56,10 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=True,
+        # Vigia só o código-fonte. Sem isso, o uvicorn observa a pasta inteira
+        # (inclui 'Krirk Code', 'data', 'logs') e REINICIA o backend toda vez
+        # que uma ferramenta cria/move um arquivo lá — derrubava a conversa.
+        reload_dirs=["backend"],
         log_level=config["logging"]["level"].lower(),
     )
 elif __name__ != "__mp_main__":

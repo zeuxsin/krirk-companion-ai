@@ -3,33 +3,32 @@ backend/tools/builtin/code_tools.py
 Execução local de código Python para o Modo Coder.
 """
 import asyncio
+import subprocess
 import sys
 
 from backend.tools.base import Tool, ToolParam
 
 
+def _run_python_blocking(code: str, timeout: float) -> tuple[str, str]:
+    """Python BLOQUEANTE (via asyncio.to_thread). asyncio subprocess não
+    funciona sob o uvicorn no Windows (SelectorEventLoop → NotImplementedError)."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    p = subprocess.run(
+        [sys.executable, '-c', code],
+        capture_output=True, timeout=timeout, creationflags=flags,
+    )
+    return (p.stdout.decode('utf-8', errors='replace').strip(),
+            p.stderr.decode('utf-8', errors='replace').strip())
+
+
 async def _run_python(code: str, timeout: float = 8.0) -> str:
     """Executa um snippet Python via subprocess e captura stdout + stderr."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, '-c', code,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        out, err = await asyncio.to_thread(_run_python_blocking, code, timeout)
+    except subprocess.TimeoutExpired:
+        return f'⏱ Timeout: execução levou mais de {int(timeout)} segundos'
     except FileNotFoundError:
         return f'Erro: Python não encontrado em "{sys.executable}"'
-
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        return f'⏱ Timeout: execução levou mais de {int(timeout)} segundos'
-
-    out = stdout.decode('utf-8', errors='replace').strip()
-    err = stderr.decode('utf-8', errors='replace').strip()
 
     if err and not out:
         return f'Erro:\n{err}'
