@@ -133,15 +133,32 @@ orgulhosa, determinada, codando, jogando, tranquila`
 - Whitelist em `configs/config.yaml → tools.whitelist`.
 - **delegate_code** (`backend/integrations/claude_code.py`): delega código
   substancial ao Claude Code CLI (`~\.local\bin\claude.exe`; fallback
-  `shutil.which`). Headless: `-p --output-format json --permission-mode
-  acceptEdits --max-turns N`, prompt via STDIN (nunca argv — aspas/acentos no
-  Windows). Roda em BACKGROUND (single-slot: 1 tarefa por vez); ao terminar,
-  anuncia via `ProactiveMonitor._broadcast_comment(trigger="claude_code")`
-  (WS + TTS + Telegram + memória) com diff real de arquivos
-  (snapshot mtime antes/depois, ignora __pycache__). Registrada no `app.py`
-  (não no build_default_registry) quando `claude_code.enabled` + CLI presente.
-  Config: `claude_code:` (model sonnet, timeout 600s, max_turns 30).
-  Roteador prioriza p/ código real; `write_file+<GENERATE>` vira fallback.
+  `shutil.which`). DOIS modos (`claude_code.interactive`):
+  - INTERATIVO (padrão): `_start_interactive` abre a JANELA REAL do Claude Code
+    num console novo (`cmd /c start ... cmd /k <bat>`), cwd = `work_dir`
+    (`C:\Krirk_AI\KRIRK\Krirk Code`). A tarefa (com acentos) vai em
+    `_KRIRK_TAREFA.md`; o .bat lançador é ASCII puro (evita aspas/acentos no
+    argv). `autonomous:true` → `--dangerously-skip-permissions` (trabalha
+    sozinho, usuário assiste; há uma aceitação ÚNICA por instalação no 1º uso);
+    `false` → `--permission-mode acceptEdits`. Fire-and-forget: sem rastreio de
+    conclusão. A janela fica aberta.
+  - HEADLESS (`interactive:false`): `-p --output-format stream-json --verbose`,
+    prompt via STDIN (run_cli_blocking em thread — SelectorEventLoop do uvicorn
+    não faz subprocess async), log persistente `data/claude_code.log` +
+    janela de progresso reutilizável, anuncia conclusão via
+    `_broadcast_comment(trigger="claude_code")` com diff real.
+  Registrada no `app.py` (não no build_default_registry) com `work_dir` quando
+  `claude_code.enabled` + CLI presente. Config: `claude_code:`
+  (interactive, autonomous, work_dir, model sonnet). `work_dir` está em
+  `tools.allowed_dirs`. Roteador prioriza p/ código real; `write_file+<GENERATE>`
+  vira fallback.
+- **Roteamento de ferramentas — task "route"** (`router.py`): a decisão de
+  tool (`_decide_tool`) usa a task `route`, separada da `tools` (extração de
+  fato/KG/diário). `TASK_FALLBACK["route"] = [cerebras, nvidia, google, ollama]`
+  com Cerebras `gemma-4-31b` primeiro (mais confiável que o mistral p/ escolher
+  a tool). Só a decisão (~1/msg) usa Cerebras — a extração de fundo fica em
+  `tools` (nvidia), então o limite 5 req/min do gemma-4-31b não estoura.
+  Circuit breaker: cooldown curto (65s) p/ 429/rate-limit vs 180s p/ falha dura.
 - **Agenda real (Phantom System)**: o calendário gamificado do usuário vive em
   `C:\calendario` (app web + `server.py` local em http://127.0.0.1:8123;
   save em localStorage — a Krirk NÃO escreve no save). Ponte

@@ -23,6 +23,7 @@ TASK_MODELS: dict[str, dict[str, str]] = {
         # mistral-small-4-119b (MoE) responde em ~3s e é o único NVIDIA confiável (2026-07)
         "chat":   "mistralai/mistral-small-4-119b-2603",
         "tools":  "mistralai/mistral-small-4-119b-2603",
+        "route":  "mistralai/mistral-small-4-119b-2603",  # fallback do roteamento
         "code":   "nvidia/llama-3.3-nemotron-super-49b-v1",
         "ocr":    "meta/llama-3.2-11b-vision-instruct",   # phi-4-multimodal foi removido (410)
         "vision": "meta/llama-3.2-11b-vision-instruct",
@@ -32,17 +33,23 @@ TASK_MODELS: dict[str, dict[str, str]] = {
     "google": {
         "chat":   "gemma-4-31b-it",
         "tools":  "gemma-4-31b-it",
+        "route":  "gemma-4-31b-it",
         "code":   "gemma-4-31b-it",
     },
     "cerebras": {
         # Catálogo 2026-07: gpt-oss-120b, gemma-4-31b, zai-glm-4.7 (llama3.1 removidos)
         "chat":   "gpt-oss-120b",
         "tools":  "gpt-oss-120b",
+        # roteamento de ferramentas: gemma-4-31b é rápido (não-reasoning) e mais
+        # confiável que o mistral p/ decidir a tool. Limite 5 req/min é suficiente
+        # porque SÓ a decisão de rota usa "route" (1x/msg) — extração fica em "tools"
+        "route":  "gemma-4-31b",
         "code":   "zai-glm-4.7",
     },
     "ollama": {
         "chat":   "gemma3:4b",
         "tools":  "qwen2.5-coder:7b",
+        "route":  "qwen2.5-coder:7b",
         "code":   "qwen2.5-coder:7b",
         "embed":  "nomic-embed-text",
         "vision": "gemma3:4b",   # gemma3 é multimodal — fallback local de visão
@@ -56,6 +63,9 @@ TASK_MODELS: dict[str, dict[str, str]] = {
 TASK_FALLBACK: dict[str, list[str]] = {
     "chat":   ["nvidia", "google", "cerebras", "ollama"],
     "tools":  ["nvidia", "google", "cerebras", "ollama"],
+    # decisão de rota: Cerebras (gemma-4-31b) primeiro — mais confiável que o
+    # mistral p/ escolher a tool; nvidia/google/ollama como rede de segurança
+    "route":  ["cerebras", "nvidia", "google", "ollama"],
     "code":   ["nvidia", "cerebras", "ollama"],
     "embed":  ["nvidia", "ollama"],
     "ocr":    ["nvidia", "ollama"],
@@ -104,7 +114,8 @@ class ProviderRouter:
     # Circuit breaker: após N falhas consecutivas, o provider é pulado por um tempo.
     # Evita desperdiçar ~10s de timeout por chamada quando um provider está fora.
     BREAKER_THRESHOLD = 2
-    BREAKER_COOLDOWN = 180.0  # segundos
+    BREAKER_COOLDOWN = 180.0       # segundos (falha "dura": modelo fora/timeout)
+    RATE_LIMIT_COOLDOWN = 65.0     # rate limit (429) recupera na virada do minuto
 
     def __init__(
         self,
@@ -121,11 +132,19 @@ class ProviderRouter:
 
     # ── Circuit breaker ───────────────────────────────────────────────────────
 
-    def _record_failure(self, name: str) -> None:
+    def _record_failure(self, name: str, exc: Exception | None = None) -> None:
         self._failures[name] = self._failures.get(name, 0) + 1
         if self._failures[name] >= self.BREAKER_THRESHOLD:
-            self._skip_until[name] = time.monotonic() + self.BREAKER_COOLDOWN
-            print(f"[KRIRK][router] Circuit breaker: {name} pausado por {self.BREAKER_COOLDOWN:.0f}s")
+            # Rate limit (429) não é o provider quebrado — recupera rápido; cooldown curto
+            rate = exc is not None and (
+                getattr(exc, "status_code", None) == 429
+                or "429" in str(exc) or "rate" in str(exc).lower()
+                or "too many requests" in str(exc).lower()
+            )
+            cooldown = self.RATE_LIMIT_COOLDOWN if rate else self.BREAKER_COOLDOWN
+            self._skip_until[name] = time.monotonic() + cooldown
+            print(f"[KRIRK][router] Circuit breaker: {name} pausado por {cooldown:.0f}s"
+                  + (" (rate limit)" if rate else ""))
 
     def _record_success(self, name: str) -> None:
         self._failures.pop(name, None)
@@ -186,7 +205,7 @@ class ProviderRouter:
             except Exception as e:
                 last_err = e
                 if _is_retriable(e):
-                    self._record_failure(name)
+                    self._record_failure(name, e)
                     print(f"[KRIRK][router] {name} falhou ({e}), tentando próximo...")
                     continue
                 raise  # erro não-retriable -> propaga
@@ -219,7 +238,7 @@ class ProviderRouter:
             except Exception as e:
                 last_err = e
                 if _is_retriable(e):
-                    self._record_failure(name)
+                    self._record_failure(name, e)
                     print(f"[KRIRK][router] {name} falhou ({e}), tentando próximo...")
                     continue
                 raise

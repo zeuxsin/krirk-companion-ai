@@ -1292,18 +1292,90 @@ cc_no = ClaudeCodeDelegator({}, notify=_cc_noop, cli_path="")
 check("sem CLI: is_available False", not cc_no.is_available())
 check("sem CLI: start da erro claro", cc_no.start("x", Path.home() / "Desktop").startswith("[Erro]"))
 
-cc_busy = ClaudeCodeDelegator({}, notify=_cc_noop, cli_path="C:\\fake\\claude.exe")
+# lock de tarefa única só existe no modo headless (interactive abre janela)
+cc_busy = ClaudeCodeDelegator({"interactive": False}, notify=_cc_noop, cli_path="C:\\fake\\claude.exe")
 cc_busy.job = {"task": "outra tarefa", "folder": "x", "started": _time.time()}
 cc_res = cc_busy.start("nova", Path.home() / "Desktop")
-check("tarefa em andamento: recusa a segunda", cc_res.startswith("[Erro]") and "andamento" in cc_res)
+check("headless: tarefa em andamento recusa a segunda", cc_res.startswith("[Erro]") and "andamento" in cc_res)
 
 cc_tool = make_delegate_code(cc_no)
 check("tool delegate_code criada", cc_tool.name == "delegate_code")
 check("task vazia da erro", asyncio.run(cc_tool.func(task="", folder="Desktop")).startswith("[Erro]"))
-check("pasta fora do home da erro",
+check("pasta fora do home/allowed da erro",
       asyncio.run(cc_tool.func(task="fazer x", folder="C:\\Windows")).startswith("[Erro]"))
 
 check("delegate_code e terminal", "delegate_code" in _TERMINAL_TOOLS)
+
+# Roteador "route": Cerebras (gemma-4-31b) primeiro, resto como rede
+from backend.providers.router import TASK_MODELS as _TM, TASK_FALLBACK as _TF
+check("route: Cerebras e o primeiro do fallback", _TF["route"][0] == "cerebras")
+check("route: Cerebras usa gemma-4-31b", _TM["cerebras"]["route"] == "gemma-4-31b")
+check("route: nvidia continua na rede de seguranca", "nvidia" in _TF["route"])
+check("route: todo provider do fallback tem modelo route",
+      all(_TM[p].get("route") for p in _TF["route"]))
+check("_decide_tool usa a task route (nao tools)", '"route",' in orq_src)
+check("extracao de fundo continua em tools (nao estoura 5/min do Cerebras)",
+      orq_src.count('"tools",') >= 3)
+
+# Circuit breaker: 429 (rate limit) recupera rápido; falha dura pausa mais
+from backend.providers.router import ProviderRouter as _PR
+_rb = _PR({}, task_models={}, task_fallback={})
+_rb._record_failure("x", Exception("Error code: 429 - too many requests"))
+_rb._record_failure("x", Exception("Error code: 429 - too many requests"))
+import time as _tmod
+_cool_rate = _rb._skip_until["x"] - _tmod.monotonic()
+check("429: cooldown curto (~65s, nao 180s)", 40 < _cool_rate <= 66)
+_rb2 = _PR({}, task_models={}, task_fallback={})
+_rb2._record_failure("y", Exception("Request timed out"))
+_rb2._record_failure("y", Exception("Request timed out"))
+_cool_hard = _rb2._skip_until["y"] - _tmod.monotonic()
+check("falha dura: cooldown longo (~180s)", _cool_hard > 120)
+
+# delegate_code: workspace padrao + modo interativo (janela real)
+class _FakeDeleg:
+    def __init__(self): self.last = None
+    def start(self, task, folder): self.last = (task, str(folder)); return "ok"
+
+from backend.tools.builtin.file_tools import set_allowed_dirs as _set_dirs_cc
+_set_dirs_cc(["C:/Krirk_AI/KRIRK/Krirk Code"])
+_fd = _FakeDeleg()
+_tool_wd = make_delegate_code(_fd, "C:/Krirk_AI/KRIRK/Krirk Code")
+asyncio.run(_tool_wd.func(task="fazer um app", folder=""))
+check("delegate_code usa o workspace padrao quando folder vazio",
+      _fd.last[1].replace("\\", "/").endswith("Krirk Code"))
+asyncio.run(_tool_wd.func(task="editar", folder="Desktop/proj_existente"))
+check("delegate_code respeita folder explicito", _fd.last[1].endswith("proj_existente"))
+_set_dirs_cc([])  # restaura (a secao 25 reconfigura o calendario)
+
+# _start_interactive: escreve a tarefa em arquivo (acentos) + lanca janela (mock)
+import backend.integrations.claude_code as _cc_mod
+_orig_popen = _cc_mod.subprocess.Popen
+_launches = []
+_cc_mod.subprocess.Popen = lambda *a, **k: (_launches.append(a[0]), type("P", (), {"poll": lambda s: None})())[1]
+try:
+    _di = ClaudeCodeDelegator({"interactive": True, "model": "sonnet"},
+                              notify=_cc_noop, cli_path="C:/fake/claude.exe")
+    _witmp = Path(tempfile.mkdtemp(prefix="krirk_iwd_"))
+    try:
+        _resi = _di.start("Criar app com acentuação: pão, coração, çã", _witmp)
+        check("interativo: resposta diz que abriu a janela", "Abri o Claude Code" in _resi)
+        _tf = _witmp / "_KRIRK_TAREFA.md"
+        check("interativo: tarefa gravada em arquivo", _tf.exists())
+        check("interativo: acentos preservados no arquivo (utf-8)",
+              "coração" in _tf.read_text(encoding="utf-8"))
+        check("interativo: lancou um cmd/start (janela nova)",
+              _launches and _launches[0][0] == "cmd" and "start" in _launches[0])
+        check("interativo: NAO seta job (sem lock, janela fica aberta)", _di.job is None)
+        _bats = list(Path(tempfile.gettempdir()).glob("krirk_claude_*.bat"))
+        _bat_txt = _bats[-1].read_text(encoding="ascii") if _bats else ""
+        check("interativo autonomo: usa skip-permissions (nao trava no trust)",
+              "--dangerously-skip-permissions" in _bat_txt)
+        for _b in _bats:
+            _b.unlink(missing_ok=True)
+    finally:
+        shutil.rmtree(_witmp, ignore_errors=True)
+finally:
+    _cc_mod.subprocess.Popen = _orig_popen
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -372,8 +372,14 @@ class Orchestrator:
                     self.tool_registry,
                     timeout=self._tool_cfg.get("timeout_seconds", 10),
                 )
-                tool_model = self._tool_cfg.get("tool_model", self._ollama_config["model"])
-                print(f"[KRIRK][tools] Modelo de roteamento: {tool_model}")
+                # Ordem real de roteamento da task "route" (não o tool_model local,
+                # que só entra como último fallback via Ollama)
+                route_order = self.router._task_fallback.get("route", [])
+                route_desc = " → ".join(
+                    f"{p}/{self.router._get_model(p, 'route')}" for p in route_order
+                    if self.router._get_model(p, "route")
+                )
+                print(f"[KRIRK][tools] Roteamento (route): {route_desc}")
             except Exception as e:
                 print(f"[KRIRK][tools] Falha ao inicializar ferramentas: {e}")
 
@@ -559,9 +565,11 @@ class Orchestrator:
             '"content": "<LAST_RESPONSE>"}}\n'
             "- delegate_code (FIRST CHOICE for real coding, when listed above): creating "
             "or changing an app/script/project, adding features, fixing bugs, multi-file "
-            "work. It runs in BACKGROUND and the user is notified when done. task = the "
-            "COMPLETE description of what to build/change (carry over every detail the "
-            "user gave), folder = the project folder from the conversation. Example: "
+            "work. It OPENS a Claude Code WINDOW the user watches live (not instant, not "
+            "background-silent). task = the COMPLETE description of what to build/change "
+            "(carry over every detail the user gave). Leave folder EMPTY for new code (it "
+            "uses the default workspace); set folder ONLY to edit an existing project "
+            "elsewhere. Example: "
             '{"tool": "delegate_code", "params": {"task": "adicionar barra de progresso '
             'ao contador de recompensas do agenda_gui.py, sem remover funcionalidades", '
             '"folder": "Desktop/agenda_e_recompensas"}}\n'
@@ -645,7 +653,7 @@ class Orchestrator:
         )
 
         raw = await self.router.complete(
-            "tools",
+            "route",
             [{"role": "user", "content": planning_prompt}],
             temperature=0.1,
             max_tokens=600,
@@ -978,11 +986,12 @@ class Orchestrator:
             if tool_name_used == "delegate_code":
                 followup_instruction = (
                     f"O usuário pediu: \"{message}\"\n"
-                    "A tarefa foi DELEGADA a um agente e está RODANDO EM SEGUNDO "
-                    "PLANO — ela AINDA NÃO TERMINOU e nenhum arquivo existe ainda. "
-                    "Diga de forma curta e natural que você começou a trabalhar "
-                    "nisso e que avisa assim que terminar. É PROIBIDO dizer que "
-                    "está pronto, feito, criado ou salvo."
+                    "A tarefa foi DELEGADA ao Claude Code e está SÓ COMEÇANDO — "
+                    "ela AINDA NÃO TERMINOU e NENHUM arquivo existe ainda. "
+                    "Reafirme em português, de forma curta e natural, APENAS o "
+                    "que o resultado da ferramenta acima diz (abriu a janela pra "
+                    "trabalhar / começou a mexer). É PROIBIDO dizer que está "
+                    "pronto, feito, criado ou salvo."
                 )
             elif tool_name_used in ("web_search", "search_memory"):
                 if tool_name_used == "web_search":
@@ -1088,17 +1097,21 @@ class Orchestrator:
         # Override determinístico: alegou conclusão ou nem mencionou o
         # segundo plano → resposta substituída por uma honesta.
         if executed_tools and executed_tools[-1][0] == "delegate_code" \
-                and executed_tools[-1][1].startswith("Tarefa delegada"):
+                and not executed_tools[-1][1].startswith("[Erro]"):
+            interativo = executed_tools[-1][1].startswith("Abri o Claude Code")
             low = clean_response.lower()
             claims_done = re.search(
                 r"(?:ficou|est[áa]|t[áa])\s+pront|\bfeit[oa]\b|criei|criad[oa]\b|"
                 r"conclu[íi]|salvei|finalizei|entregue", low)
-            mentions_bg = re.search(
-                r"avis|segundo plano|rodando|trabalhando|come[çc]ei|em andamento|"
-                r"mandei fazer|deleguei", low)
-            if claims_done or not mentions_bg:
+            mentions_work = re.search(
+                r"abri|janela|acompanh|avis|segundo plano|rodando|trabalhando|"
+                r"come[çc]ei|em andamento|mandei fazer|deleguei", low)
+            if claims_done or not mentions_work:
                 print("[KRIRK][honestidade] Resposta pós-delegação alegava conclusão — substituída")
                 clean_response = (
+                    "Abri o Claude Code numa janela pra trabalhar nisso — dá uma "
+                    "olhada lá que dá pra acompanhar ao vivo."
+                    if interativo else
                     "Comecei a trabalhar nisso agora — tá rodando em segundo plano. "
                     "Te aviso assim que terminar."
                 )

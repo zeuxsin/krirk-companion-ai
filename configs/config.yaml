@@ -111,7 +111,8 @@ tools:
   # Pastas EXTRAS que as ferramentas de arquivo podem acessar (além do home).
   # Cada uma vira alias pelo nome da pasta ("calendario" → C:\calendario).
   allowed_dirs:
-    - "C:/calendario"        # Phantom System — agenda gamificada do usuário
+    - "C:/calendario"                # Phantom System — agenda gamificada do usuário
+    - "C:/Krirk_AI/KRIRK/Krirk Code" # workspace de código da Krirk (delegate_code)
   calendar_dir: "C:/calendario"   # ponte add_calendar_task/list_calendar_tasks
   calendar_api: "http://127.0.0.1:8123"   # server.py do Phantom System (SSE ao vivo);
                                           # fora do ar → fallback dados/krirk_inbox.js
@@ -172,10 +173,15 @@ tools:
 # máquina (usa a assinatura Claude do usuário). A Krirk avisa quando termina.
 claude_code:
   enabled: true
+  interactive: true      # true = abre a JANELA REAL do Claude Code (acompanha ao vivo)
+                         # false = headless em segundo plano + aviso ao terminar
+  autonomous: true       # (interativo) true = trabalha sozinho na janela (você assiste);
+                         # false = você aprova confiança/ações passo a passo
+  work_dir: "C:/Krirk_AI/KRIRK/Krirk Code"   # pasta padrão de código da Krirk
   model: "sonnet"        # modelo das delegações (sonnet = rápido/econômico)
-  timeout_seconds: 600   # limite por tarefa (10 min)
-  max_turns: 30          # limite de turnos do agente
-  show_window: true      # abre um console com o progresso ao vivo da tarefa
+  timeout_seconds: 600   # limite por tarefa (10 min) — só no modo headless
+  max_turns: 30          # limite de turnos do agente — só no modo headless
+  show_window: true      # (headless) console com o progresso ao vivo da tarefa
 
 # ── Fase 6: plugins de terceiros em plugins/*.py ─────────────────────────────
 plugins:

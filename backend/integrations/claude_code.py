@@ -1,16 +1,20 @@
 """
 backend/integrations/claude_code.py
-Delegação de tarefas de código ao Claude Code CLI (headless, em background).
+Delegação de tarefas de código ao Claude Code CLI.
 
-A Krirk monta a descrição da tarefa e o CLI executa como agente de verdade:
-lê os arquivos reais, edita no lugar, pode rodar/testar. Ao terminar, a
-conclusão é anunciada pelos mesmos canais dos comentários proativos
-(WS + TTS + Telegram) e salva na memória.
+Dois modos (config claude_code.interactive):
+- INTERATIVO (padrão): abre a JANELA REAL do Claude Code na pasta de trabalho;
+  o usuário acompanha ao vivo e a janela fica aberta. A tarefa vai por arquivo
+  (_KRIRK_TAREFA.md) e o .bat lançador é ASCII puro (evita aspas/acentos no
+  Windows). Fire-and-forget: a Krirk não rastreia a conclusão.
+- HEADLESS: roda em segundo plano (stream-json), grava um log de progresso e
+  anuncia a conclusão pelos canais proativos (WS + TTS + Telegram).
 """
 import asyncio
 import json
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -259,6 +263,12 @@ class ClaudeCodeDelegator:
     def start(self, task: str, folder: Path) -> str:
         if not self._cli:
             return "[Erro] Claude Code CLI não encontrado neste computador."
+        # Modo interativo (padrão): abre a JANELA REAL do Claude Code e o
+        # usuário acompanha ao vivo. Modo headless: roda em segundo plano e
+        # avisa quando termina.
+        if self._cfg.get("interactive", True):
+            return self._start_interactive(task, folder)
+
         if self.job is not None:
             mins = int((time.time() - self.job["started"]) // 60)
             return (
@@ -273,6 +283,62 @@ class ClaudeCodeDelegator:
             f"Tarefa delegada ao agente de código (Claude Code), rodando em "
             f"SEGUNDO PLANO na pasta {folder}: {task[:150]}\n"
             "Você será avisado quando terminar — dá pra continuar conversando."
+        )
+
+    def _start_interactive(self, task: str, folder: Path) -> str:
+        """
+        Abre o Claude Code INTERATIVO numa janela nova, trabalhando em `folder`.
+        A tarefa (com acentos) vai por ARQUIVO; o .bat lançador fica em ASCII
+        puro (sem inferno de aspas no Windows). A janela fica aberta — o
+        usuário acompanha e continua a sessão se quiser.
+        """
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            task_file = folder / "_KRIRK_TAREFA.md"
+            task_file.write_text(
+                f"# Tarefa da KRIRK\n\n{task}\n", encoding="utf-8"
+            )
+        except OSError as e:
+            return f"[Erro] Não consegui preparar a pasta de trabalho: {e}"
+
+        model = str(self._cfg.get("model", "sonnet") or "sonnet")
+        prompt = (
+            "Leia o arquivo _KRIRK_TAREFA.md nesta pasta e realize a tarefa "
+            "descrita nele. Trabalhe apenas nesta pasta. Prefira a biblioteca "
+            "padrao do Python. Rode o codigo para conferir que funciona. Ao "
+            "terminar, escreva um breve resumo do que fez."
+        )
+        # Autônomo (padrão): --dangerously-skip-permissions pula o prompt de
+        # "confiar na pasta" e cada permissão — a janela trabalha sozinha e o
+        # usuário só assiste. autonomous:false volta ao acceptEdits (o usuário
+        # aprova a confiança + ações), útil se quiser controle passo a passo.
+        if self._cfg.get("autonomous", True):
+            perm = "--dangerously-skip-permissions"
+        else:
+            perm = '--permission-mode acceptEdits --allowedTools "Bash(python *)"'
+        bat = Path(tempfile.gettempdir()) / f"krirk_claude_{int(time.time())}.bat"
+        bat_body = (
+            "@echo off\r\n"
+            "title KRIRK - Claude Code\r\n"
+            f'cd /d "{folder}"\r\n'
+            f'"{self._cli}" --model {model} {perm} "{prompt}"\r\n'
+            "echo.\r\n"
+            "echo === Sessao do Claude Code encerrada. Feche quando quiser. ===\r\n"
+        )
+        try:
+            bat.write_text(bat_body, encoding="ascii")
+            subprocess.Popen(
+                ["cmd", "/c", "start", "KRIRK - Claude Code", "cmd", "/k", str(bat)],
+                cwd=str(folder),
+            )
+        except Exception as e:
+            return f"[Erro] Não consegui abrir a janela do Claude Code: {e}"
+        print(f"[KRIRK][claude-code] Janela interativa aberta em {folder}: '{task[:80]}'")
+        return (
+            f"Abri o Claude Code numa janela pra trabalhar nisso, na pasta "
+            f"{folder}. Dá pra acompanhar tudo por lá ao vivo — a janela fica "
+            "aberta. Não tem como eu saber daqui quando ele termina, então dá "
+            "uma olhada na janela."
         )
 
     def _open_progress_window(self, log_path: Path) -> None:
@@ -376,29 +442,31 @@ class ClaudeCodeDelegator:
             print(f"[KRIRK][claude-code] Falha ao anunciar conclusão: {e}")
 
 
-def make_delegate_code(delegator: ClaudeCodeDelegator) -> Tool:
+def make_delegate_code(delegator: ClaudeCodeDelegator, work_dir: str = "Desktop") -> Tool:
     from backend.tools.builtin.file_tools import _resolve_aliases, _safe_path
 
-    async def _delegate(task: str = "", folder: str = "Desktop") -> str:
+    async def _delegate(task: str = "", folder: str = "") -> str:
         task = (task or "").strip()
         if not task:
             return "[Erro] Descreva a tarefa de código a delegar (param 'task')."
-        safe = _safe_path(_resolve_aliases(str(folder or "Desktop")))
+        # Sem pasta específica → workspace padrão (Krirk Code)
+        alvo = (folder or "").strip() or work_dir
+        safe = _safe_path(_resolve_aliases(alvo))
         if safe is None:
-            return f"[Erro] Pasta não permitida (deve estar dentro de {_HOME}): {folder}"
+            return f"[Erro] Pasta não permitida: {alvo}"
         return delegator.start(task, safe)
 
     return Tool(
         name="delegate_code",
         description=(
             "Delega trabalho de código SUBSTANCIAL (criar ou modificar app/script/"
-            "projeto, várias mudanças) a um agente de código real que edita os "
-            "arquivos na pasta. Roda em SEGUNDO PLANO e o usuário é avisado ao "
-            "terminar — nunca prometa resultado imediato."
+            "projeto, várias mudanças) ao Claude Code, que abre uma JANELA e edita "
+            f"os arquivos. Por padrão trabalha na pasta de código ({work_dir}); passe "
+            "'folder' só para mexer num projeto existente em outro lugar."
         ),
         params=[
             ToolParam("task", "descrição completa da tarefa em português, com todos os detalhes do pedido", "string"),
-            ToolParam("folder", "pasta do projeto (ex: Desktop/meu_app)", "path", required=False, default="Desktop"),
+            ToolParam("folder", "pasta do projeto SÓ se for um projeto já existente noutro lugar (ex: Desktop/meu_app); vazio = pasta de código padrão", "path", required=False, default=""),
         ],
         func=_delegate,
     )
