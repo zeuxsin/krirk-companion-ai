@@ -178,7 +178,8 @@ claude_code:
   autonomous: true       # (interativo) true = trabalha sozinho na janela (você assiste);
                          # false = você aprova confiança/ações passo a passo
   work_dir: "C:/Krirk_AI/KRIRK/Krirk Code"   # pasta padrão de código da Krirk
-  model: "sonnet"        # modelo das delegações (sonnet = rápido/econômico)
+  model: "opus"          # modelo das delegações — 'opus' resolve p/ Claude Opus 4.8
+                         # (mais capaz, porém consome bem mais da cota Pro que o sonnet)
   timeout_seconds: 600   # limite por tarefa (10 min) — só no modo headless
   max_turns: 30          # limite de turnos do agente — só no modo headless
   show_window: true      # (headless) console com o progresso ao vivo da tarefa
