@@ -15,7 +15,7 @@ gratuitas. Single-user (`user_id` fixo `"default"`).
 | Camada | Tecnologia | Onde |
 |---|---|---|
 | Backend | Python 3.14 (venv `.venv`) + FastAPI + WebSocket | `backend/`, `main.py` |
-| LLM routing | Multi-provider: NVIDIA NIM → Google → Cerebras → Ollama | `backend/providers/` |
+| LLM routing | Multi-provider: NVIDIA, Gemini, Cerebras, Groq, Cohere, Mistral, OpenRouter (+2ª chave `<name>2` em failover cada) → Ollama local | `backend/providers/` |
 | LLM local | Ollama (gemma3:4b chat, qwen2.5-coder:7b tools/code, nomic-embed-text) | `configs/config.yaml` |
 | TTS | edge-tts `pt-BR-FranciscaNeural` (requer internet) | `backend/voice/tts.py` |
 | STT | faster-whisper CPU, modelo "base", local | `backend/voice/stt.py` |
