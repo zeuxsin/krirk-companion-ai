@@ -68,10 +68,13 @@ def create_app() -> FastAPI:
             print("[KRIRK][claude-code] CLI 'claude' não encontrado — delegação desativada")
         elif "delegate_code" in config.get("tools", {}).get("whitelist", []):
             cc_workdir = cc_cfg.get("work_dir", "Desktop")
-            orchestrator.tool_registry.register(make_delegate_code(delegator, cc_workdir))
+            orchestrator.tool_registry.register(
+                make_delegate_code(delegator, cc_workdir, router=orchestrator.router)
+            )
             orchestrator.code_delegator = delegator
             modo = "interativo" if cc_cfg.get("interactive", True) else "headless"
-            print(f"[KRIRK][claude-code] delegate_code registrada ({modo}, workspace: {cc_workdir})")
+            fb = "com fallback" if cc_cfg.get("fallback_on_limit", True) else "sem fallback"
+            print(f"[KRIRK][claude-code] delegate_code registrada ({modo}, {fb}, workspace: {cc_workdir})")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

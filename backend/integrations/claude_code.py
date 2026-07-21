@@ -260,6 +260,37 @@ class ClaudeCodeDelegator:
     def is_available(self) -> bool:
         return bool(self._cli)
 
+    async def is_within_limit(self) -> bool:
+        """
+        Pré-checagem barata (headless, 1 turno) antes de abrir a janela: o
+        Claude Code ainda tem cota? False só quando detecta limite de uso —
+        erro inconclusivo (rede/timeout) devolve True (tenta a janela, que
+        mostra o estado real). Custa 1 mensagem mínima, desprezível perto de
+        uma sessão inteira do agente.
+        """
+        if not self._cli:
+            return False
+        model = str(self._cfg.get("model", "opus") or "opus")
+        try:
+            rc, out, err = await asyncio.to_thread(
+                run_cli_blocking, self._cli,
+                ["-p", "--output-format", "json", "--model", model, "--max-turns", "1"],
+                "responda: ok", str(_HOME), 30, None,
+            )
+        except Exception as e:
+            print(f"[KRIRK][claude-code] Pré-checagem inconclusiva ({type(e).__name__}) — tenta a janela")
+            return True
+        blob = (out + " " + err).lower()
+        limited = (
+            "usage limit" in blob or "rate limit" in blob or "rate_limit" in blob
+            or "429" in blob or "quota" in blob
+            or ("is_error" in blob and '"is_error":true' in blob.replace(" ", "")
+                and "limit" in blob)
+        )
+        if limited:
+            print("[KRIRK][claude-code] Sem cota no Claude Code — usando fallback (modelo de código na nuvem)")
+        return not limited
+
     def start(self, task: str, folder: Path) -> str:
         if not self._cli:
             return "[Erro] Claude Code CLI não encontrado neste computador."
@@ -442,7 +473,47 @@ class ClaudeCodeDelegator:
             print(f"[KRIRK][claude-code] Falha ao anunciar conclusão: {e}")
 
 
-def make_delegate_code(delegator: ClaudeCodeDelegator, work_dir: str = "Desktop") -> Tool:
+async def generate_file_fallback(router, task: str, folder: Path) -> str:
+    """
+    Fallback quando o Claude Code está sem cota: gera UM arquivo Python
+    completo com o modelo de código da nuvem (mesmo caminho do <GENERATE>)
+    e salva na pasta. Degradação honesta — 1 arquivo, não um projeto inteiro.
+    """
+    from backend.core.orchestrator import (
+        _largest_code_block, _strip_outer_fence, _strip_reasoning,
+    )
+    import re as _re
+    prompt = (
+        f"Escreva um programa Python COMPLETO e funcional para esta tarefa:\n\n{task}\n\n"
+        "Regras: um ÚNICO arquivo, só biblioteca padrão do Python, do início ao "
+        "fim, sem explicações. A PRIMEIRA linha deve ser um comentário "
+        "'# arquivo: <nome>.py' com um nome de arquivo adequado. "
+        "Pode usar cerca de código (```), que será removida."
+    )
+    try:
+        raw = await router.complete(
+            "code",
+            [{"role": "system", "content": "detailed thinking off"},
+             {"role": "user", "content": prompt}],
+            temperature=0.4, max_tokens=8000,
+        )
+    except Exception as e:
+        return f"[Erro] O fallback de código também falhou: {type(e).__name__}: {e}"
+    code = _largest_code_block(raw) or _strip_outer_fence(_strip_reasoning(raw or ""))
+    if not code.strip():
+        return "[Erro] O modelo de fallback não gerou código."
+    m = _re.search(r"#\s*arquivo:\s*([\w\-.]+\.py)", code)
+    fname = m.group(1) if m else "app.py"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / fname).write_text(code, encoding="utf-8")
+    except OSError as e:
+        return f"[Erro] Não consegui salvar o arquivo do fallback: {e}"
+    return f"Arquivo salvo: {folder / fname} ({len(code)} caracteres)"
+
+
+def make_delegate_code(delegator: ClaudeCodeDelegator, work_dir: str = "Desktop",
+                       router=None) -> Tool:
     from backend.tools.builtin.file_tools import _resolve_aliases, _safe_path
 
     async def _delegate(task: str = "", folder: str = "") -> str:
@@ -454,6 +525,18 @@ def make_delegate_code(delegator: ClaudeCodeDelegator, work_dir: str = "Desktop"
         safe = _safe_path(_resolve_aliases(alvo))
         if safe is None:
             return f"[Erro] Pasta não permitida: {alvo}"
+        # Fallback: sem cota no Claude Code → gera com o modelo da nuvem
+        if router is not None and delegator._cfg.get("fallback_on_limit", True):
+            if not await delegator.is_within_limit():
+                res = await generate_file_fallback(router, task, safe)
+                if res.startswith("[Erro]"):
+                    return res
+                return (
+                    "O Claude Code está sem cota agora, então fiz uma versão "
+                    f"com o modelo de código alternativo. {res}. É um arquivo só "
+                    "e pode ficar mais simples — quando o limite voltar, peça de "
+                    "novo que eu faço a versão completa na janela."
+                )
         return delegator.start(task, safe)
 
     return Tool(

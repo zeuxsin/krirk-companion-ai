@@ -147,11 +147,16 @@ orgulhosa, determinada, codando, jogando, tranquila`
     não faz subprocess async), log persistente `data/claude_code.log` +
     janela de progresso reutilizável, anuncia conclusão via
     `_broadcast_comment(trigger="claude_code")` com diff real.
-  Registrada no `app.py` (não no build_default_registry) com `work_dir` quando
-  `claude_code.enabled` + CLI presente. Config: `claude_code:`
-  (interactive, autonomous, work_dir, model sonnet). `work_dir` está em
-  `tools.allowed_dirs`. Roteador prioriza p/ código real; `write_file+<GENERATE>`
-  vira fallback.
+  Registrada no `app.py` (não no build_default_registry) com `work_dir` +
+  `router` quando `claude_code.enabled` + CLI presente. Config: `claude_code:`
+  (interactive, autonomous, work_dir, model opus, fallback_on_limit).
+  `work_dir` está em `tools.allowed_dirs`. Roteador prioriza p/ código real.
+  - FALLBACK DE COTA (`fallback_on_limit:true`): antes de abrir a janela,
+    `is_within_limit()` faz uma pré-checagem headless (1 turno) do Claude Code.
+    Se detecta limite de uso → `generate_file_fallback(router, ...)` gera UM
+    arquivo Python com o modelo de código da nuvem (task "code") e salva no
+    workspace (nome vindo de `# arquivo: x.py` na 1ª linha, senão app.py),
+    avisando que é a versão alternativa. Sem CLI → `write_file+<GENERATE>`.
 - **Roteamento de ferramentas — task "route"** (`router.py`): a decisão de
   tool (`_decide_tool`) usa a task `route`, separada da `tools` (extração de
   fato/KG/diário). `TASK_FALLBACK["route"] = [cerebras, nvidia, google, ollama]`

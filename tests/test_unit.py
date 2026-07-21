@@ -1409,6 +1409,64 @@ try:
 finally:
     _cc_mod.subprocess.Popen = _orig_popen
 
+# Fallback quando o Claude Code está sem cota: gera 1 arquivo com o modelo da nuvem
+from backend.integrations.claude_code import generate_file_fallback
+
+class _FakeRouterCode:
+    def __init__(self, out): self._out = out
+    async def complete(self, task, messages, **kw): return self._out
+
+_fbtmp = Path(tempfile.mkdtemp(prefix="krirk_fb_"))
+try:
+    _router_ok = _FakeRouterCode(
+        "```python\n# arquivo: jogo.py\nprint('oi do fallback')\n```")
+    _res_fb = asyncio.run(generate_file_fallback(_router_ok, "faz um jogo", _fbtmp))
+    check("fallback: salva o arquivo com o nome sugerido", (_fbtmp / "jogo.py").exists())
+    check("fallback: conteudo veio do modelo", "oi do fallback" in (_fbtmp / "jogo.py").read_text(encoding="utf-8"))
+    check("fallback: retorna 'Arquivo salvo'", _res_fb.startswith("Arquivo salvo"))
+    _res_fb2 = asyncio.run(generate_file_fallback(_FakeRouterCode("print(1)"), "x", _fbtmp))
+    check("fallback: sem '# arquivo:' usa app.py", (_fbtmp / "app.py").exists())
+    _res_fb3 = asyncio.run(generate_file_fallback(_FakeRouterCode(""), "x", _fbtmp))
+    check("fallback: modelo vazio da erro claro", _res_fb3.startswith("[Erro]"))
+finally:
+    shutil.rmtree(_fbtmp, ignore_errors=True)
+
+# Detecção de limite: parse do resultado headless do CLI (via Popen mockado)
+def _fake_run_cli(cli, args, prompt, cwd, timeout, progress=None):
+    # simula saída conforme o "cli_path" carregar a intenção
+    if "LIMITED" in cli:
+        return 0, '{"type":"result","is_error":true,"result":"Claude usage limit reached"}', ""
+    return 0, '{"type":"result","is_error":false,"result":"ok"}', ""
+
+_orig_run = _cc_mod.run_cli_blocking
+_cc_mod.run_cli_blocking = _fake_run_cli
+try:
+    _d_ok = ClaudeCodeDelegator({"model": "opus"}, notify=_cc_noop, cli_path="C:/fake/claude.exe")
+    check("is_within_limit: True quando tem cota", asyncio.run(_d_ok.is_within_limit()))
+    _d_lim = ClaudeCodeDelegator({"model": "opus"}, notify=_cc_noop, cli_path="C:/fake/LIMITED_claude.exe")
+    check("is_within_limit: False quando bate o limite de uso",
+          not asyncio.run(_d_lim.is_within_limit()))
+
+    # tool com fallback: sem cota → gera arquivo (não abre janela)
+    _set_dirs_cc(["C:/Krirk_AI/KRIRK/Krirk Code"])
+    _fbdir = Path(tempfile.mkdtemp(prefix="krirk_fbtool_"))
+    if _safe_path(str(_fbdir)) is not None:  # temp dentro do home
+        _tool_fb = make_delegate_code(
+            _d_lim, str(_fbdir),
+            router=_FakeRouterCode("```python\n# arquivo: fb.py\nprint('x')\n```"))
+        _r = asyncio.run(_tool_fb.func(task="faz um app", folder=str(_fbdir)))
+        check("tool fallback: avisa que usou o modelo alternativo", "sem cota" in _r and "alternativo" in _r)
+        check("tool fallback: arquivo realmente criado", (_fbdir / "fb.py").exists())
+    shutil.rmtree(_fbdir, ignore_errors=True)
+    _set_dirs_cc([])
+finally:
+    _cc_mod.run_cli_blocking = _orig_run
+
+check("config expoe fallback_on_limit", "fallback_on_limit" in cc_src)
+check("app.py passa router p/ delegate_code (fallback)",
+      "router=orchestrator.router" in
+      (Path(__file__).parent.parent / "backend" / "api" / "app.py").read_text(encoding="utf-8"))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 25. Agenda Phantom System (C:\calendario)
