@@ -1034,6 +1034,11 @@ check("aceite fura o filtro de small-talk", "and not accepted_offer" in orq_src)
 check("pos-delegacao tem prompt proprio (nao terminou)", "PROIBIDO dizer que" in orq_src)
 check("pos-delegacao tem override deterministico",
       "alegava conclusão — substituída" in orq_src)
+check("delegate_code responde deterministico (sem mistral, sem 'abrai')",
+      "cc_canned" in orq_src and "sem passar pelo mistral" in orq_src)
+check("resposta canned de delegate_code usa 'Abri' correto (nao 'Abrai')",
+      "Abri o Claude Code numa janela pra trabalhar" in orq_src
+      and "Abrai o Claude" not in orq_src)
 check("pergunta educada e pedido de acao", "POLITE QUESTION = REQUEST" in orq_src)
 
 

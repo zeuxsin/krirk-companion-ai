@@ -1041,16 +1041,34 @@ class Orchestrator:
 
         self.memory.save_message(user_id, "user", message)  # salva mensagem original (sem context)
 
+        # delegate_code: resposta DETERMINÍSTICA. O modelo de personalidade
+        # (mistral) emenda "Abri a janela" em "Abrai" e às vezes alega conclusão
+        # — como a mensagem é só um status honesto, emitimos a frase pronta e
+        # correta direto, sem passar pelo mistral (e sem o "abrai" streamando).
+        cc_canned = None
+        if executed_tools and executed_tools[-1][0] == "delegate_code" \
+                and not executed_tools[-1][1].startswith("[Erro]"):
+            cc_canned = (
+                "Abri o Claude Code numa janela pra trabalhar nisso — acompanha "
+                "por lá que dá pra ver ao vivo. A janela fica aberta."
+                if executed_tools[-1][1].startswith("Abri o Claude Code") else
+                "Comecei a trabalhar nisso — tá rodando em segundo plano. Te "
+                "aviso quando terminar."
+            )
+
         self.state.set(AISystemState.SPEAKING)
         yield {"type": "status", "state": "speaking"}
 
-        full_response = ""
-        async for token in self._stream_ollama(llm_messages):
-            full_response += token
-            yield {"type": "token", "content": token}
-
-        # Pós-processamento: remove reasoning tags
-        clean_response = _strip_reasoning(full_response)
+        if cc_canned is not None:
+            clean_response = cc_canned
+            yield {"type": "token", "content": cc_canned}
+        else:
+            full_response = ""
+            async for token in self._stream_ollama(llm_messages):
+                full_response += token
+                yield {"type": "token", "content": token}
+            # Pós-processamento: remove reasoning tags
+            clean_response = _strip_reasoning(full_response)
 
         # Guarda de honestidade: alegou ação sem NENHUMA ferramenta ter tido
         # SUCESSO? (zero ferramentas OU todas retornaram [Erro]). Reescreve uma
