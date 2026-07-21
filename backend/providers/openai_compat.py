@@ -122,25 +122,49 @@ class OpenAICompatProvider(BaseProvider):
         return resp.data[0].embedding
 
 
+# Provedores OpenAI-compatíveis: name -> (base_url, env_var da chave).
+# A 2ª chave de qualquer um vem de <ENV_VAR>_2 e vira o provedor "<name>2"
+# (usado como failover automático pelo circuit breaker quando a 1ª estoura).
+PROVIDER_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "nvidia":     ("https://integrate.api.nvidia.com/v1",                     "NVIDIA_API_KEY"),
+    "google":     ("https://generativelanguage.googleapis.com/v1beta/openai/", "GOOGLE_API_KEY"),
+    "cerebras":   ("https://api.cerebras.ai/v1",                              "CEREBRAS_API_KEY"),
+    "groq":       ("https://api.groq.com/openai/v1",                          "GROQ_API_KEY"),
+    "cohere":     ("https://api.cohere.ai/compatibility/v1",                  "COHERE_API_KEY"),
+    "mistral":    ("https://api.mistral.ai/v1",                               "MISTRAL_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1",                            "OPENROUTER_API_KEY"),
+}
+
+
+def make_openai_providers() -> dict[str, OpenAICompatProvider]:
+    """
+    Instancia todos os provedores OpenAI-compatíveis a partir do .env.
+    Sempre cria a instância primária (filtrada por is_available se a chave
+    estiver vazia) e, quando <ENV_VAR>_2 está preenchida, cria a secundária
+    "<name>2" com a 2ª chave.
+    """
+    providers: dict[str, OpenAICompatProvider] = {}
+    for name, (base_url, env_var) in PROVIDER_ENDPOINTS.items():
+        providers[name] = OpenAICompatProvider(name, base_url, os.getenv(env_var, ""))
+        key2 = os.getenv(env_var + "_2", "").strip()
+        if key2:
+            providers[name + "2"] = OpenAICompatProvider(name + "2", base_url, key2)
+    return providers
+
+
+# Fábricas individuais mantidas por retrocompatibilidade
 def make_nvidia() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        name="nvidia",
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=os.getenv("NVIDIA_API_KEY", ""),
-    )
+    return OpenAICompatProvider("nvidia", *_ep("nvidia"))
 
 
 def make_cerebras() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        name="cerebras",
-        base_url="https://api.cerebras.ai/v1",
-        api_key=os.getenv("CEREBRAS_API_KEY", ""),
-    )
+    return OpenAICompatProvider("cerebras", *_ep("cerebras"))
 
 
 def make_google() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        name="google",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        api_key=os.getenv("GOOGLE_API_KEY", ""),
-    )
+    return OpenAICompatProvider("google", *_ep("google"))
+
+
+def _ep(name: str) -> tuple[str, str]:
+    base_url, env_var = PROVIDER_ENDPOINTS[name]
+    return base_url, os.getenv(env_var, "")

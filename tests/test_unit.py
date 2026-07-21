@@ -532,6 +532,80 @@ check("cooldown expirado reabilita o provider", not router._is_skipped("a"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 11b. Multi-provedor: Groq/Cohere/Mistral/OpenRouter + 2ª chave
+# ─────────────────────────────────────────────────────────────────────────────
+
+section("11b. Multi-provedor + 2a chave")
+
+import os as _os_p
+from backend.providers.openai_compat import make_openai_providers, PROVIDER_ENDPOINTS
+from backend.providers.router import TASK_MODELS as _TMp, TASK_FALLBACK as _TFp, build_router
+
+check("endpoints cobrem os 7 provedores openai-compat",
+      set(PROVIDER_ENDPOINTS) == {"nvidia", "google", "cerebras", "groq", "cohere", "mistral", "openrouter"})
+
+# Fábrica: instância primária sempre; "2" só quando a 2ª chave existe
+_saved_env = {k: _os_p.environ.get(k) for k in
+              ("GROQ_API_KEY", "GROQ_API_KEY_2", "COHERE_API_KEY", "COHERE_API_KEY_2")}
+try:
+    _os_p.environ["GROQ_API_KEY"] = "k1"
+    _os_p.environ["GROQ_API_KEY_2"] = "k2"
+    _os_p.environ["COHERE_API_KEY"] = "c1"
+    _os_p.environ.pop("COHERE_API_KEY_2", None)
+    provs = make_openai_providers()
+    check("groq criado (1a chave)", "groq" in provs and provs["groq"].is_available())
+    check("groq2 criado (2a chave presente)", "groq2" in provs and provs["groq2"].is_available())
+    check("cohere criado, cohere2 NAO (sem 2a chave)", "cohere" in provs and "cohere2" not in provs)
+    check("chaves diferentes nas 2 instancias groq", provs["groq"]._api_key != provs["groq2"]._api_key)
+    _os_p.environ.pop("GROQ_API_KEY", None)
+    provs2 = make_openai_providers()
+    check("sem chave: instancia existe mas is_available False", not provs2["groq"].is_available())
+finally:
+    for k, v in _saved_env.items():
+        if v is None: _os_p.environ.pop(k, None)
+        else: _os_p.environ[k] = v
+
+# TASK_MODELS/TASK_FALLBACK cobrem os novos provedores
+for _p in ("groq", "cohere", "mistral", "openrouter"):
+    check(f"TASK_MODELS tem {_p}", _p in _TMp and _TMp[_p].get("route"))
+check("google usa aliases gemini latest (2.5 fixo deu 404)",
+      _TMp["google"]["chat"] == "gemini-flash-latest"
+      and _TMp["google"]["route"] == "gemini-flash-lite-latest")
+check("mistral usa codestral p/ code", _TMp["mistral"]["code"] == "codestral-latest")
+check("openrouter usa :free validados",
+      _TMp["openrouter"]["chat"].endswith(":free") and _TMp["openrouter"]["code"].endswith(":free"))
+
+# 402 (conta sem free tier, visto no cerebras2) precisa ser retriavel —
+# senao a excecao propaga e derruba a requisicao inteira
+from backend.providers.router import _is_retriable as _ir402
+check("402 e retriavel (cai pro proximo provedor)",
+      _ir402(Exception("Error code: 402 - Payment required to access this resource")))
+check("route: cadeia comeca com cerebras", _TFp["route"][0] == "cerebras")
+check("route: groq entra logo apos cerebras", "groq" in _TFp["route"][:4])
+# cada "2" vem imediatamente apos seu primario
+for _chain in _TFp.values():
+    for _i, _n in enumerate(_chain):
+        if _n.endswith("2") and _n != "2":
+            check(f"'{_n}' vem logo apos '{_n[:-1]}'", _i > 0 and _chain[_i-1] == _n[:-1])
+
+# build_router: provedores "2" herdam os modelos do primario; sem chave => pulados
+_saved2 = {k: _os_p.environ.get(k) for k in ("MISTRAL_API_KEY", "MISTRAL_API_KEY_2")}
+try:
+    _os_p.environ["MISTRAL_API_KEY"] = "m1"
+    _os_p.environ["MISTRAL_API_KEY_2"] = "m2"
+    _r = build_router({"providers": {}, "ollama": {}, "tools": {}})
+    check("build_router cria mistral2 c/ 2a chave", "mistral2" in _r._providers)
+    check("mistral2 herda o modelo code do primario",
+          _r._get_model("mistral2", "code") == _r._get_model("mistral", "code") == "codestral-latest")
+    check("provedor sem chave nao entra na ordem",
+          all(n != "cohere2" for n, _ in _r._ordered_providers("chat")))
+finally:
+    for k, v in _saved2.items():
+        if v is None: _os_p.environ.pop(k, None)
+        else: _os_p.environ[k] = v
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 12. Fase 5 — memória de longo prazo
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1343,8 +1417,8 @@ from backend.providers.router import TASK_MODELS as _TM, TASK_FALLBACK as _TF
 check("route: Cerebras e o primeiro do fallback", _TF["route"][0] == "cerebras")
 check("route: Cerebras usa gemma-4-31b", _TM["cerebras"]["route"] == "gemma-4-31b")
 check("route: nvidia continua na rede de seguranca", "nvidia" in _TF["route"])
-check("route: todo provider do fallback tem modelo route",
-      all(_TM[p].get("route") for p in _TF["route"]))
+check("route: todo provider PRIMARIO do fallback tem modelo route",
+      all(_TM[p].get("route") for p in _TF["route"] if not p.endswith("2")))
 check("_decide_tool usa a task route (nao tools)", '"route",' in orq_src)
 check("extracao de fundo continua em tools (nao estoura 5/min do Cerebras)",
       orq_src.count('"tools",') >= 3)

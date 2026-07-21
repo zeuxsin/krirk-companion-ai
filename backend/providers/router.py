@@ -11,7 +11,7 @@ import time
 from typing import AsyncGenerator
 
 from .base import BaseProvider
-from .openai_compat import make_nvidia, make_cerebras, make_google
+from .openai_compat import make_openai_providers
 from .ollama_prov import OllamaProvider
 
 
@@ -31,10 +31,14 @@ TASK_MODELS: dict[str, dict[str, str]] = {
         "safety": "meta/llama-guard-4-12b",
     },
     "google": {
-        "chat":   "gemma-4-31b-it",
-        "tools":  "gemma-4-31b-it",
-        "route":  "gemma-4-31b-it",
-        "code":   "gemma-4-31b-it",
+        # Aliases "latest": os IDs fixos 2.5 deram 404 p/ contas novas (2026-07);
+        # os aliases seguem o modelo free-tier atual da conta automaticamente
+        "chat":   "gemini-flash-latest",
+        "tools":  "gemini-flash-lite-latest",
+        "route":  "gemini-flash-lite-latest",
+        "code":   "gemini-flash-latest",
+        "ocr":    "gemini-flash-latest",
+        "vision": "gemini-flash-latest",
     },
     "cerebras": {
         # Catálogo 2026-07: gpt-oss-120b, gemma-4-31b, zai-glm-4.7 (llama3.1 removidos)
@@ -45,6 +49,37 @@ TASK_MODELS: dict[str, dict[str, str]] = {
         # porque SÓ a decisão de rota usa "route" (1x/msg) — extração fica em "tools"
         "route":  "gemma-4-31b",
         "code":   "zai-glm-4.7",
+    },
+    "groq": {
+        # Inferência rápida — ótimo p/ route/chat. IDs conferir em console.groq.com/docs/models
+        "chat":   "llama-3.3-70b-versatile",
+        "tools":  "llama-3.3-70b-versatile",
+        "route":  "llama-3.3-70b-versatile",
+        "code":   "openai/gpt-oss-120b",
+    },
+    "cohere": {
+        # Trial 20 req/min. Endpoint compat: model = ID nativo da Cohere
+        "chat":   "command-a-03-2025",
+        "tools":  "command-r7b-12-2024",
+        "route":  "command-r7b-12-2024",
+        "code":   "command-a-03-2025",
+    },
+    "mistral": {
+        # Plano free "Experiment" (~1 RPS). Codestral p/ código.
+        "chat":   "mistral-medium-latest",
+        "tools":  "mistral-small-latest",
+        "route":  "mistral-small-latest",
+        "code":   "codestral-latest",
+        "vision": "pixtral-large-latest",
+        "ocr":    "pixtral-large-latest",
+    },
+    "openrouter": {
+        # Catálogo :free validado 2026-07 (gemma-4-31b:free vive em 429 upstream;
+        # llama/deepseek :free sairam). Conferir em openrouter.ai/models se falhar.
+        "chat":   "nvidia/nemotron-3-super-120b-a12b:free",
+        "tools":  "nvidia/nemotron-3-super-120b-a12b:free",
+        "route":  "nvidia/nemotron-3-super-120b-a12b:free",
+        "code":   "poolside/laguna-m.1:free",
     },
     "ollama": {
         "chat":   "gemma3:4b",
@@ -57,25 +92,33 @@ TASK_MODELS: dict[str, dict[str, str]] = {
     },
 }
 
-# Ordem de fallback por tarefa
-# tools passa por google/cerebras antes do qwen local — roteamento de qualidade
-# importa mais que latência (o qwen 7b gera planos ruins)
+# Ordem de fallback por tarefa. Cada "<name>2" (2ª chave) vem logo após o
+# primário — quando a 1ª chave estoura (429 → circuit breaker pausa 65s), a 2ª
+# assume, dobrando o limite antes de passar pro próximo provedor. Provedores
+# sem chave configurada são pulados automaticamente (is_available).
 TASK_FALLBACK: dict[str, list[str]] = {
-    "chat":   ["nvidia", "google", "cerebras", "ollama"],
-    "tools":  ["nvidia", "google", "cerebras", "ollama"],
-    # decisão de rota: Cerebras (gemma-4-31b) primeiro — mais confiável que o
-    # mistral p/ escolher a tool; nvidia/google/ollama como rede de segurança
-    "route":  ["cerebras", "nvidia", "google", "ollama"],
-    "code":   ["nvidia", "cerebras", "ollama"],
+    "chat":   ["nvidia", "groq", "groq2", "mistral", "mistral2", "cohere", "cohere2",
+               "google", "google2", "cerebras", "cerebras2", "openrouter", "openrouter2", "ollama"],
+    "tools":  ["nvidia", "groq", "groq2", "cerebras", "cerebras2", "google", "google2",
+               "mistral", "mistral2", "cohere", "cohere2", "openrouter", "openrouter2", "ollama"],
+    # decisão de rota: Cerebras (gemma-4-31b) primeiro — validado como o mais
+    # confiável; Groq (rápido) e Gemini logo atrás; resto como rede de segurança
+    "route":  ["cerebras", "cerebras2", "groq", "groq2", "google", "google2", "nvidia",
+               "mistral", "mistral2", "cohere", "cohere2", "openrouter", "openrouter2", "ollama"],
+    # código: Groq (gpt-oss rápido) e Codestral da Mistral primeiro
+    "code":   ["groq", "groq2", "mistral", "mistral2", "cerebras", "cerebras2", "nvidia",
+               "openrouter", "openrouter2", "cohere", "cohere2", "ollama"],
     "embed":  ["nvidia", "ollama"],
-    "ocr":    ["nvidia", "ollama"],
-    "vision": ["nvidia", "ollama"],
+    "ocr":    ["nvidia", "google", "google2", "mistral", "mistral2", "ollama"],
+    "vision": ["nvidia", "google", "google2", "mistral", "mistral2", "ollama"],
     "safety": ["nvidia"],
 }
 
 # Erros que ativam fallback para o próximo provider
-# 403 (sem acesso ao modelo) e 410 (modelo removido) também caem para o próximo
-_RETRIABLE_CODES = (400, 403, 404, 410, 422, 429, 500, 502, 503, 504)
+# 403 (sem acesso ao modelo) e 410 (modelo removido) também caem para o próximo.
+# 402 (payment required): conta sem free tier ativo (visto no cerebras2) —
+# sem ele na lista a exceção PROPAGARIA e derrubaria a requisição inteira.
+_RETRIABLE_CODES = (400, 402, 403, 404, 410, 422, 429, 500, 502, 503, 504)
 
 
 def _is_retriable(exc: Exception) -> bool:
@@ -262,23 +305,29 @@ def build_router(config: dict) -> ProviderRouter:
     """Instancia o router a partir do config + variáveis de ambiente."""
     ollama_url = config.get("ollama", {}).get("base_url", "http://localhost:11434")
 
-    providers: dict[str, BaseProvider] = {
-        "nvidia":   make_nvidia(),
-        "google":   make_google(),
-        "cerebras": make_cerebras(),
-        "ollama":   OllamaProvider(base_url=ollama_url),
-    }
+    # Provedores OpenAI-compatíveis (nvidia/google/cerebras/groq/cohere/mistral/
+    # openrouter + as 2ªs chaves "<name>2" quando presentes) + Ollama local
+    providers: dict[str, BaseProvider] = make_openai_providers()
+    providers["ollama"] = OllamaProvider(base_url=ollama_url)
 
-    # Log quais providers estão disponíveis
+    # Log quais providers estão disponíveis (com chave)
     avail = [n for n, p in providers.items() if p.is_available()]
     print(f"[KRIRK][router] Providers disponíveis: {avail}")
 
-    # Sobrescreve modelos com valores do config se definidos
+    # deepcopy: não mutar o TASK_MODELS global (senão o config/2ª-chave vaza entre testes)
+    import copy
+    task_models = copy.deepcopy(TASK_MODELS)
+
+    # Sobrescreve/define modelos com valores do config (aceita provedores novos)
     providers_cfg = config.get("providers", {})
-    task_models = dict(TASK_MODELS)  # cópia
     for pname, pcfg in providers_cfg.items():
-        if "models" in pcfg and pname in task_models:
-            task_models[pname].update(pcfg["models"])
+        if isinstance(pcfg, dict) and "models" in pcfg:
+            task_models.setdefault(pname, {}).update(pcfg["models"])
+
+    # Provedores "2" (2ª chave) herdam os modelos do primário
+    for pname in providers:
+        if pname.endswith("2") and pname[:-1] in task_models:
+            task_models[pname] = dict(task_models[pname[:-1]])
 
     # Sobrescreve modelos Ollama com os do config principal (retrocompatibilidade)
     ollama_cfg = config.get("ollama", {})

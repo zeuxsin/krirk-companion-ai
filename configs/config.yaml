@@ -68,8 +68,10 @@ knowledge_graph:
   enabled: true
   max_relations_in_prompt: 25   # máximo de relações injetadas no system prompt
 
-# ── Providers de LLM (NVIDIA → Google → Cerebras → Ollama) ───────────────────
-# Chaves ficam no .env — aqui ficam apenas os modelos customizados (opcional)
+# ── Providers de LLM (cadeia de fallback com muitas free tiers) ──────────────
+# Chaves no .env (veja .env.example). Cada provedor aceita uma 2ª chave
+# <VAR>_2 → vira "<name>2" e assume automático quando a 1ª estoura (429).
+# Aqui só os modelos (opcional) — edite os IDs se um provedor devolver erro.
 providers:
   nvidia:
     # Modelos verificados com latência < 2s no free tier (2026-06)
@@ -84,16 +86,52 @@ providers:
       embed:  "nvidia/nv-embedqa-e5-v5"              # embedding rápido
       safety: "meta/llama-guard-4-12b"
   google:
+    # Aliases "latest" (IDs fixos 2.5 deram 404 p/ contas novas): seguem o
+    # Gemini Flash/Flash-Lite free-tier atual da conta automaticamente
     models:
-      chat:  "gemma-4-31b-it"
-      tools: "gemma-4-31b-it"
-      code:  "gemma-4-31b-it"
+      chat:   "gemini-flash-latest"
+      tools:  "gemini-flash-lite-latest"
+      route:  "gemini-flash-lite-latest"
+      code:   "gemini-flash-latest"
+      ocr:    "gemini-flash-latest"
+      vision: "gemini-flash-latest"
   cerebras:
     models:
       # Catálogo 2026-07 (llama3.1-* removidos do free tier)
       chat:  "gpt-oss-120b"
       tools: "gpt-oss-120b"
+      route: "gemma-4-31b"
       code:  "zai-glm-4.7"
+  groq:
+    # Inferência ultrarrápida. IDs: console.groq.com/docs/models
+    models:
+      chat:  "llama-3.3-70b-versatile"
+      tools: "llama-3.3-70b-versatile"
+      route: "llama-3.3-70b-versatile"
+      code:  "openai/gpt-oss-120b"
+  cohere:
+    # Trial 20 req/min. Endpoint compat: model = ID nativo Cohere
+    models:
+      chat:  "command-a-03-2025"
+      tools: "command-r7b-12-2024"
+      route: "command-r7b-12-2024"
+      code:  "command-a-03-2025"
+  mistral:
+    # Plano free "Experiment" (~1 RPS, 500K TPM). Codestral p/ código.
+    models:
+      chat:   "mistral-medium-latest"
+      tools:  "mistral-small-latest"
+      route:  "mistral-small-latest"
+      code:   "codestral-latest"
+      vision: "pixtral-large-latest"
+      ocr:    "pixtral-large-latest"
+  openrouter:
+    # Catálogo :free validado 2026-07 — conferir openrouter.ai/models se falhar
+    models:
+      chat:  "nvidia/nemotron-3-super-120b-a12b:free"
+      tools: "nvidia/nemotron-3-super-120b-a12b:free"
+      route: "nvidia/nemotron-3-super-120b-a12b:free"
+      code:  "poolside/laguna-m.1:free"
   ollama:
     models:
       chat:   "gemma3:4b"
