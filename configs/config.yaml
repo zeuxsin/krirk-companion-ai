@@ -218,8 +218,8 @@ claude_code:
   autonomous: true       # (interativo) true = trabalha sozinho na janela (você assiste);
                          # false = você aprova confiança/ações passo a passo
   work_dir: "C:/Krirk_AI/KRIRK/Krirk Code"   # pasta padrão de código da Krirk
-  model: "opus"          # modelo das delegações — 'opus' resolve p/ Claude Opus 4.8
-                         # (mais capaz, porém consome bem mais da cota Pro que o sonnet)
+  model: "sonnet"        # modelo das delegações (sonnet = bom e econômico na cota Pro;
+                         # "opus" = mais capaz, porém consome a cota bem mais rápido)
   fallback_on_limit: true  # sem cota no Claude Code → gera 1 arquivo com o modelo
                            # de código da nuvem (NVIDIA/Cerebras) em vez de janela morta
   timeout_seconds: 600   # limite por tarefa (10 min) — só no modo headless

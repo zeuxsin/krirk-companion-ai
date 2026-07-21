@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md — Memória técnica do KRIRK
 
-> Atualizado em 2026-06-22 (commit `f1c007f`). Este arquivo é a referência para
+> Atualizado em 2026-07-21. Este arquivo é a referência para
 > futuras sessões de desenvolvimento. Atualize-o quando a arquitetura mudar.
 
 ## Visão geral
@@ -35,26 +35,44 @@ backend/api/websocket.py  → dispatch por payload.type:
    chat | code_chat | audio | screenshot | image_chat | settings | status
    ▼
 backend/core/orchestrator.py  — pipeline de 2 fases:
-   FASE 1: _decide_tool() → parse_decision (backend/agents/planner.py) retorna:
+   FASE 1: _decide_tool() [task "route"] → parse_decision (backend/agents/planner.py):
      • {"type":"none"} — sem ferramenta
      • {"type":"tool",...} — loop iterativo até max_rounds (config: 4); cada rodada
-       recebe os resultados anteriores. Guardas: decisão repetida / "[Erro]" → break.
+       recebe os resultados anteriores. Guardas: decisão repetida → break;
+       "[Erro]" → RE-DECIDE uma vez (roteador pode corrigir params); tool em
+       _TERMINAL_TOOLS com sucesso → break (não "melhora" o resultado).
      • {"type":"plan","steps":[{"tool","params"},...]} — plano COMPLETO com params,
        executado passo a passo SEM re-roteamento (formato robusto p/ modelos pequenos).
        Passos string (legado) são re-roteados com o pedido original anexado.
        Plano sem nenhum passo executado → contexto força resposta honesta.
+     REDES DETERMINÍSTICAS (construídas a partir de bugs reais — preservar!):
+     • _is_smalltalk pula o roteamento (mas aceite de oferta fura o filtro)
+     • aceite (_is_acceptance) + oferta pendente (_pending_offer na última msg
+       da assistente) + roteador none → re-roteamento FORÇADO ("[OFERTA ACEITA]")
+     • guarda de honestidade: _claims_action sem tool com sucesso → reescrita
+       (sem tools = vira oferta; tool falhou = admite o erro real)
+     • delegate_code com sucesso → resposta CANNED determinística (o mistral
+       mangava "Abri a" → "Abrai" e alegava conclusão)
    FASE 2: router.stream("chat"|"code", …) → resposta final streamada token a token
    + background tasks (asyncio.create_task): extract_facts_bg, update_profile_bg,
-     extract_kg_bg, _summarize_history_bg
+     extract_kg_bg, write_diary_bg, _summarize_history_bg
+     (fatos/KG: reações curtas são PULADAS e a fala da assistente é só contexto —
+      pesquisa autônoma dela NÃO vira fato do usuário; corrigido 2026-07-21)
    ▼
 backend/providers/router.py — ProviderRouter com fallback automático
-   TASK_FALLBACK: chat/tools=[nvidia,google,cerebras,ollama], …
-   Erros retriables (403/410/429/5xx/timeout/not found/gone) → próximo provider
-   Circuit breaker: 2 falhas seguidas pausam o provider por 180s (nunca deixa
-   a lista vazia — se todos pausados, usa a ordem completa)
+   7 provedores OpenAI-compat (nvidia, google/Gemini, cerebras, groq, cohere,
+   mistral, openrouter) + Ollama local. Cada <VAR>_2 no .env vira "<name>2"
+   (mesma URL, 2ª chave) logo após o primário na cadeia — failover dobra o limite.
+   Tasks: chat/tools/route/code/embed/ocr/vision/safety. "route" (decisão de
+   tool, ~1/msg) = cerebras gemma-4-31b primeiro; "tools" (extração de fundo,
+   ~4/msg) fica no nvidia p/ não estourar o 5 req/min do gemma.
+   Erros retriables (400/402/403/404/410/422/429/5xx/timeout/gone) → próximo.
+   Circuit breaker: 2 falhas pausam o provider — 65s p/ 429 (rate limit
+   recupera na virada do minuto), 180s p/ falha dura. Nunca deixa a lista vazia.
    ATENÇÃO (2026-07): NVIDIA free tier instável — meta/llama-* mortos, só
    mistral-small responde (intermitente). Cerebras: gpt-oss-120b/gemma-4-31b/
-   zai-glm-4.7 (llama3.1-* removidos). Verificar catálogos ao debugar timeout.
+   zai-glm-4.7. Google: usar aliases gemini-flash(-lite)-latest (IDs fixos 2.5
+   deram 404 p/ contas novas). OpenRouter :free muda sempre — conferir catálogo.
 ```
 
 ### Eventos WebSocket (backend → frontend)
@@ -99,12 +117,16 @@ orgulhosa, determinada, codando, jogando, tranquila`
 - `memory_manager.py` — SQLite: messages (com `is_proactive` e `session`),
   facts (com `pinned`), user_profile, conversation_summaries + fachada para
   KG e vector store.
-- **Longo prazo (Fase 5)**: save_fact deduplica por texto normalizado (reforça
-  confiança em vez de duplicar); get_facts aplica decay exponencial (meia-vida
-  30 dias, oculta < 0.25); purge_stale_facts no startup apaga não-fixados
-  < 0.15 com +90 dias; pin_fact/remember_this cria memórias que nunca decaem;
-  search_messages_by_period alimenta a tool search_history ("o que falamos
-  semana passada"); POST /api/memory/consolidate mescla fatos redundantes via LLM.
+- **Longo prazo (Fase 5)**: save_fact deduplica por texto normalizado E por
+  similaridade fuzzy (`_facts_similar`, difflib ratio ≥ 0.86 — variação mínima
+  REFORÇA em vez de duplicar); `dedupe_similar_facts` no boot compacta
+  retroativamente as quase-iguais acumuladas (determinístico, sem LLM;
+  sobrevive fixado > confiança > recência). get_facts aplica decay exponencial
+  (meia-vida 30 dias, oculta < 0.25); purge_stale_facts no startup apaga
+  não-fixados < 0.15 com +90 dias; pin_fact/remember_this cria memórias que
+  nunca decaem; search_messages_by_period alimenta a tool search_history
+  ("o que falamos semana passada"); a fusão SEMÂNTICA de fatos diferentes é a
+  sublation (proposta com consentimento).
 - `knowledge_graph.py` — relações entidade→verbo→entidade em SQLite.
 - `profile_manager.py` — perfil estruturado (nome, profissão, interesses…).
 - `vector_store.py` — ChromaDB + embeddings nomic-embed-text.
@@ -113,12 +135,15 @@ orgulhosa, determinada, codando, jogando, tranquila`
 
 ## Ferramentas (backend/tools/)
 
-- `registry.py` (build_default_registry(config, memory, router), filtra pela
-  whitelist do config.yaml), `executor.py` (timeout padrão 10s; `Tool.timeout`
-  sobrescreve por-tool), `base.py` (classe Tool), `plugin_loader.py` (Fase 6).
+- `registry.py` (build_default_registry(config, memory, router, orchestrator),
+  filtra pela whitelist do config.yaml e configura `set_allowed_dirs` no boot),
+  `executor.py` (timeout padrão 10s; `Tool.timeout` sobrescreve por-tool),
+  `base.py` (classe Tool), `plugin_loader.py` (Fase 6).
 - Builtin: system_tools (powershell, clipboard, janela ativa…), file_tools
-  (read/write/list/search com `_safe_path` restrito ao home + PATH_ALIASES
-  "desktop"/"documentos"…), desktop_tools (open_url com aliases+TLD completion,
+  (read/write/list/search/create_folder/move_file com `_safe_path`: sandbox =
+  home + `tools.allowed_dirs` do config; caminho RELATIVO resolve contra o
+  Desktop; PATH_ALIASES "desktop"/"documentos"/nome das pastas extras…),
+  desktop_tools (open_url com aliases+TLD completion,
   open_app com busca em PATH/Program Files/registry, set_timer, volume),
   web_tools (ddgs), media_tools,
   memory_tools (search_memory, search_history, remember_this),
@@ -149,7 +174,7 @@ orgulhosa, determinada, codando, jogando, tranquila`
     `_broadcast_comment(trigger="claude_code")` com diff real.
   Registrada no `app.py` (não no build_default_registry) com `work_dir` +
   `router` quando `claude_code.enabled` + CLI presente. Config: `claude_code:`
-  (interactive, autonomous, work_dir, model opus, fallback_on_limit).
+  (interactive, autonomous, work_dir, model sonnet, fallback_on_limit).
   `work_dir` está em `tools.allowed_dirs`. Roteador prioriza p/ código real.
   - FALLBACK DE COTA (`fallback_on_limit:true`): antes de abrir a janela,
     `is_within_limit()` faz uma pré-checagem headless (1 turno) do Claude Code.
@@ -171,8 +196,9 @@ orgulhosa, determinada, codando, jogando, tranquila`
   caminhos: (1) POST /api/inbox no server.py — campos ricos (hora separada,
   tipo tarefa/compromisso com XP próprio, boss por nome) e a tela atualiza
   na hora via SSE; (2) fallback `dados\krirk_inbox.js` quando o servidor
-  está desligado (app importa no boot via `mergeKrirkInbox()`; hora vai
-  embutida no título — a ponte velha não tem o campo). Datas resolvidas
+  está desligado (app importa no boot via `mergeKrirkInbox()`, que aceita
+  chaves PT/EN, tem campo hora próprio e MIGRA sozinho entradas antigas com
+  hora no fim do título). Datas resolvidas
   DETERMINISTICAMENTE em Python (`resolve_date`) e hora normalizada
   (`norm_hora`: "14h"→"14:00") — nunca pelo LLM. Config:
   `tools.calendar_dir` + `tools.calendar_api`. Sandbox: `tools.allowed_dirs`
@@ -185,10 +211,18 @@ orgulhosa, determinada, codando, jogando, tranquila`
 
 - `configs/config.yaml` — modelos, TTS/STT, memória, proativo, providers, tools.
 - `configs/personality.json` — nome da Krirk, emoção inicial, notas custom.
-- `.env` (**NUNCA commitar, NUNCA ler/exibir valores**): `NVIDIA_API_KEY`,
-  `GOOGLE_API_KEY`, `CEREBRAS_API_KEY`, e opcionais BACKEND_HOST/PORT etc.
+- `.env` (**NUNCA commitar, NUNCA ler/exibir valores**): chaves dos 7
+  provedores (`NVIDIA/GOOGLE/CEREBRAS/GROQ/COHERE/MISTRAL/OPENROUTER_API_KEY`,
+  cada uma com variante `_2` opcional p/ failover), `TELEGRAM_BOT_TOKEN`, e
+  opcionais BACKEND_HOST/PORT etc. Ver `.env.example`.
 - `data/settings.json` — settings persistidos em runtime (TTS on/off, voz,
   proativo). Gitignored. Aplicado no startup em `app.py`.
+- `.claude/agents/*.md` — subagentes do Claude Code criados pelo usuário
+  (architect, code-writer, debugger, docs-writer, reviewer, tester). Inertes
+  até serem invocados; o fluxo normal de desenvolvimento NÃO os usa (sessão
+  fria custa mais tokens que continuar com contexto).
+- `Krirk Code/` — workspace padrão do delegate_code. GITIGNORED (projetos
+  pessoais gerados pela Krirk — nunca commitar, como `data/`).
 
 ## Comandos
 
@@ -209,9 +243,15 @@ cd frontend; npm run tauri build
 # Validações
 cd frontend; npx tsc --noEmit                                  # tipos TS
 .venv\Scripts\python.exe -m compileall backend main.py -q      # sintaxe Python
-.venv\Scripts\python.exe tests\test_krirk.py                   # suite (26 testes;
-#   ATENÇÃO: faz chamadas reais às APIs NVIDIA/Google/Cerebras e ao Ollama)
+.venv\Scripts\python.exe tests\test_unit.py                    # suite OFFLINE (500+),
+#   validação PADRÃO após toda mudança — sem rede, roda em segundos
+.venv\Scripts\python.exe tests\test_krirk.py                   # suite ONLINE (26 testes;
+#   ATENÇÃO: faz chamadas reais às APIs cloud e ao Ollama — só com autorização)
 ```
+
+Nota: o `main.py` roda o uvicorn com `reload_dirs=["backend"]` — só código em
+`backend/` recarrega sozinho. Mudança em `configs/config.yaml`, `main.py` ou
+`Krirk Code/` exige reiniciar o `python main.py`.
 
 ## Convenções obrigatórias
 
@@ -256,9 +296,9 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
   `neutro`; verificar/renomear quando o usuário trocar as imagens.
 - Endpoints REST de memória (`/api/memory/*`) não têm autenticação — aceitável
   para app local single-user, mas não expor a rede.
-- `app.py` usa `@app.on_event("startup")` (deprecado no FastAPI moderno; migrar
-  para lifespan handler eventualmente).
-- Sem testes do frontend; suite Python depende de rede/chaves.
+- Sem testes do frontend (a suite offline `test_unit.py` cobre só o backend).
+- `cerebras2` (2ª chave Cerebras) retorna 402 em tudo — a conta precisa ativar
+  o free tier no painel da Cerebras; a cadeia pula sem quebrar (2026-07-21).
 - `react-router-dom` está nas dependências mas não é usado (roteamento é via
   query param `?window=`).
 
@@ -267,8 +307,8 @@ cd frontend; npx tsc --noEmit                                  # tipos TS
 - Imagens viajam nas mensagens como chave `"images": [b64, ...]`.
 - Ollama aceita o formato nativamente; `openai_compat._to_openai_messages()`
   converte para content-array (image_url data URI) para NVIDIA/Google/Cerebras.
-- Rota de visão: router task "vision" (NVIDIA llama-3.2-vision → Ollama gemma3);
-  OCR: task "ocr" (NVIDIA phi-4-multimodal → gemma3).
+- Rota de visão: task "vision"/"ocr" — NVIDIA llama-3.2-vision → Gemini flash
+  → Mistral pixtral → Ollama gemma3 (phi-4-multimodal foi removido, 410).
 - `capture.py`: capture_screen(monitor), capture_region(l,t,w,h), capture_thumbnail.
 - Timeout de rede sobe para 45s automaticamente quando a mensagem tem imagens.
 
@@ -293,6 +333,11 @@ Armazéns em `memory_manager.py`: `lexicon`, `reflections`, `diary`,
   bordões + entrada de sonho; `research()` pesquisa um tópico e guarda nota de
   aprendizado. Agendados pelo `ProactiveMonitor` (timestamps em
   `data/reflection_state.json`; dream 3h, research 6h). Modo ativo puxa assunto.
+  NOTAS DE PESQUISA são interesses DELA: ficam no banco e entram no prompt como
+  "coisas que você andou estudando sozinha" (own_interests, com aviso de nunca
+  atribuir ao usuário); o anúncio espontâneo na conversa é gated por
+  `reflection.share_notes` (padrão false — mudado 2026-07-21 após as pesquisas
+  contaminarem os fatos do usuário em loop).
   IMPORTANTE: o loop do ProactiveMonitor inicia se proativo OU reflexão estiverem
   habilitados; o toggle proativo das Configurações controla SÓ tela/Spotify —
   a reflexão roda independente (desacoplado em 2026-07-16).

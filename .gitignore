@@ -65,3 +65,7 @@ frontend/src-tauri/gen/
 
 # Configs com segredos
 configs/secrets.yaml
+agenda.json
+
+# Workspace de codigo pessoal gerado pela Krirk (delegate_code)
+Krirk Code/
