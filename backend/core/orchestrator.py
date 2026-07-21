@@ -950,6 +950,7 @@ class Orchestrator:
             user_id, limit=self._config.get("reflection", {}).get("max_insights_in_prompt", 5)
         )
         recent_diary = self.memory.get_recent_diary(user_id, limit=3)
+        own_interests = self.memory.get_recent_notes(user_id, limit=3)
         persona_kernel = self.memory.get_active_kernel()
 
         system_prompt = self.personality.build_system_prompt(
@@ -962,6 +963,7 @@ class Orchestrator:
             lexicon=lexicon if lexicon else None,
             insights=insights if insights else None,
             recent_diary=recent_diary if recent_diary else None,
+            own_interests=own_interests if own_interests else None,
             persona_kernel=persona_kernel,
             brain_state=self._brain_state_label(),
         )
@@ -1730,6 +1732,11 @@ class Orchestrator:
         Formato de LINHAS (não JSON): fatos contêm aspas/vírgulas naturais que
         quebravam o json.loads ("Expecting ',' delimiter").
         """
+        # Reações curtas ("ok", "que legal") não contêm fatos sobre o usuário —
+        # e extraí-las contaminava a memória com temas que a PRÓPRIA Krirk
+        # levantou (pesquisas autônomas viravam "interesse do usuário")
+        if _is_acceptance(user_msg) or _is_smalltalk(user_msg):
+            return
         prompt = (
             "Analise esta conversa e extraia fatos concretos e PERMANENTES sobre o USUÁRIO "
             "(não sobre a IA).\n"
@@ -1737,9 +1744,13 @@ class Orchestrator:
             "Se não houver fatos relevantes, responda apenas: NENHUM\n"
             "Exemplos BONS: nome, profissão, cidade, hobby específico, preferência clara.\n"
             "NÃO extraia: hora, data, dia da semana, clima, valores numéricos temporários, "
-            "ações da conversa, perguntas feitas. Só fatos que ainda serão verdade daqui a 6 meses.\n\n"
+            "ações da conversa, perguntas feitas. Só fatos que ainda serão verdade daqui a 6 meses.\n"
+            "REGRA CRÍTICA DE FONTE: um fato só vale se vier das PALAVRAS DO PRÓPRIO usuário. "
+            "A fala da Assistente é apenas contexto — se um tema foi introduzido POR ELA "
+            "(pesquisa própria, comentário espontâneo, sugestão) e o usuário só reagiu, "
+            "isso NÃO é um fato sobre o usuário. Na dúvida: NENHUM.\n\n"
             f"Usuário: {user_msg[:500]}\n"
-            f"Assistente: {assistant_msg[:500]}"
+            f"Assistente (apenas contexto, NÃO é fonte de fatos): {assistant_msg[:500]}"
         )
         try:
             raw = await self.router.complete(
@@ -1811,6 +1822,8 @@ class Orchestrator:
         Background task: extrai entidades e relações permanentes via qwen2.5-coder.
         Persiste no KnowledgeGraphManager (SQLite) sem duplicatas.
         """
+        if _is_acceptance(user_msg) or _is_smalltalk(user_msg):
+            return  # reação curta não gera relação — evita contaminar o KG
         prompt = (
             "Analise a conversa e extraia relações concretas APENAS sobre o USUÁRIO "
             "ou coisas que ele possui, usa, criou ou está envolvido.\n"
@@ -1824,9 +1837,11 @@ class Orchestrator:
             "- Verbos curtos: usa, criou, trabalha_em, mora_em, gosta_de, estuda, tem, conhece\n"
             "- Apenas fatos PERMANENTES (ainda verdadeiros em 6 meses)\n"
             "- NUNCA relações sobre a assistente/IA — só sobre o usuário\n"
+            "- FONTE: só o que o PRÓPRIO usuário disse. Temas que a Assistente "
+            "introduziu (pesquisas dela, sugestões) NÃO viram relação do usuário.\n"
             "- Entidades específicas e nomeadas (não genéricas)\n\n"
             f"User: {user_msg[:500]}\n"
-            f"Assistant: {asst_msg[:500]}"
+            f"Assistant (apenas contexto, NÃO é fonte): {asst_msg[:500]}"
         )
         try:
             raw = await self.router.complete(

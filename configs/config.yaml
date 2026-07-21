@@ -53,6 +53,8 @@ proactive:
 reflection:
   enabled: true
   active_mode: true          # true = puxa assunto sobre insights; false = só enriquece o prompt
+  share_notes: false         # pesquisas autônomas ficam no banco como interesses DELA
+                             # (entram no prompt); true = volta a anunciar na conversa
   dream_every_hours: 3       # intervalo entre reflexões (sonhos)
   research_every_hours: 6    # intervalo entre pesquisas autônomas
   idle_seconds: 120          # só reflete com o usuário ocioso há N segundos

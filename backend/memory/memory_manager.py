@@ -22,6 +22,27 @@ def _normalize_fact(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# Limiar de "quase igual": acima disso dois fatos são a mesma memória com
+# palavras trocadas ("usuário organiza projetos em pastas dentro de code" vs
+# "usuário organiza projetos em pastas dentro de uma pasta chamada code")
+FUZZY_DUP_THRESHOLD = 0.86
+
+
+def _facts_similar(a: str, b: str, threshold: float = FUZZY_DUP_THRESHOLD) -> bool:
+    """True se dois fatos normalizados são quase idênticos (difflib ratio)."""
+    from difflib import SequenceMatcher
+    na, nb = _normalize_fact(a), _normalize_fact(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    # quick_ratio é um teto barato — evita o ratio caro em pares óbvios
+    sm = SequenceMatcher(None, na, nb)
+    if sm.quick_ratio() < threshold:
+        return False
+    return sm.ratio() >= threshold
+
+
 def _effective_confidence(confidence: float, updated_at: str, pinned: bool, now: datetime) -> float:
     """Confiança com decay exponencial por idade. Fatos fixados nunca decaem."""
     if pinned:
@@ -252,8 +273,10 @@ class MemoryManager:
                 (user_id,)
             ).fetchall()
             for r in rows:
-                if _normalize_fact(r["fact"]) == norm:
-                    # Duplicata → reforça em vez de inserir
+                # Duplicata exata OU quase igual (fuzzy) → reforça em vez de
+                # inserir. O fuzzy evita o acúmulo de variações mínimas do
+                # mesmo fato ("...pasta code" vs "...pasta chamada code").
+                if _normalize_fact(r["fact"]) == norm or _facts_similar(r["fact"], fact):
                     conn.execute(
                         """UPDATE facts SET confidence = MIN(1.0, confidence + 0.25),
                            updated_at = ?, pinned = MAX(pinned, ?) WHERE id = ?""",
@@ -334,6 +357,42 @@ class MemoryManager:
                 (user_id,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def dedupe_similar_facts(self, user_id: str = "default") -> int:
+        """
+        Compactação retroativa: funde fatos QUASE idênticos que já estão no
+        banco (acumulados antes do dedupe fuzzy no save). Em cada grupo de
+        similares sobrevive o de maior prioridade (fixado > confiança > mais
+        recente), herdando a maior confiança do grupo. Retorna quantos foram
+        fundidos. Determinístico — não usa LLM (a fusão SEMÂNTICA de fatos
+        diferentes continua sendo a sublation, com consentimento).
+        """
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, fact, confidence, pinned, updated_at FROM facts WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()]
+
+            # prioridade: fixado primeiro, depois confiança, depois recência
+            rows.sort(key=lambda r: (r["pinned"], r["confidence"], r["updated_at"]), reverse=True)
+            merged = 0
+            survivors: list[dict] = []
+            for r in rows:
+                keeper = next((s for s in survivors if _facts_similar(s["fact"], r["fact"])), None)
+                if keeper is None:
+                    survivors.append(r)
+                    continue
+                # funde: keeper herda a maior confiança/pinned e some o duplicado
+                conn.execute(
+                    """UPDATE facts SET confidence = MIN(1.0, MAX(confidence, ?) + 0.1),
+                       pinned = MAX(pinned, ?) WHERE id = ?""",
+                    (r["confidence"], r["pinned"], keeper["id"])
+                )
+                conn.execute("DELETE FROM facts WHERE id = ?", (r["id"],))
+                merged += 1
+        if merged:
+            print(f"[KRIRK][memory] Compactadas {merged} memórias quase iguais (dedupe fuzzy)")
+        return merged
 
     def purge_stale_facts(self, user_id: str = "default") -> int:
         """
@@ -566,6 +625,15 @@ class MemoryManager:
     def mark_note_shared(self, note_id: int) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE learning_notes SET shared=1 WHERE id=?", (note_id,))
+
+    def get_recent_notes(self, user_id: str, limit: int = 3) -> list[dict]:
+        """Últimas notas de pesquisa (interesses próprios da Krirk) p/ o prompt."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT topic, content FROM learning_notes WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Kernel versionado (identidade auto-autorada) ──────────────────────────
 

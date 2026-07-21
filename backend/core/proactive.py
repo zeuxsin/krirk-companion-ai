@@ -49,6 +49,9 @@ class ProactiveMonitor:
         self._research_every = float(rcfg.get("research_every_hours", 6)) * 3600
         self._reflection_idle = float(rcfg.get("idle_seconds", 120))
         self._reflection_cooldown = float(rcfg.get("proactive_cooldown", 600))
+        # Notas de pesquisa são INTERESSES DELA (banco + prompt), não anúncios:
+        # compartilhamento espontâneo desligado por padrão (share_notes: true religa)
+        self._share_notes = bool(rcfg.get("share_notes", False))
         self._last_reflection_comment: float = 0.0
 
         # Estado interno
@@ -132,8 +135,10 @@ class ProactiveMonitor:
         state = self._load_sched()
         wall = datetime.now().timestamp()
 
-        # 1) Compartilha nota de aprendizado pendente (se houver e cooldown ok)
-        if (now - self._last_reflection_comment) >= self._reflection_cooldown and self._ws_manager._active:
+        # 1) Compartilha nota de aprendizado pendente (desligado por padrão:
+        # as notas ficam no banco como interesses dela e entram no prompt)
+        if self._share_notes and (now - self._last_reflection_comment) >= self._reflection_cooldown \
+                and self._ws_manager._active:
             pending = await self._reflection.format_pending_note()
             if pending:
                 note_id, comment = pending

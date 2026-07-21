@@ -92,6 +92,11 @@ def create_app() -> FastAPI:
             orchestrator.memory.purge_stale_facts("default")
         except Exception as e:
             print(f"[KRIRK][memory] Purge falhou: {e}")
+        # Compactação: funde memórias quase idênticas acumuladas (dedupe fuzzy)
+        try:
+            orchestrator.memory.dedupe_similar_facts("default")
+        except Exception as e:
+            print(f"[KRIRK][memory] Dedupe fuzzy falhou: {e}")
         await proactive_monitor.start()
 
         # Ponte Telegram — a Krirk no celular (token no .env, nunca no yaml)

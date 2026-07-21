@@ -88,6 +88,7 @@ class PersonalitySystem:
         lexicon: list[dict] | None = None,         # bordões/gírias internas [{term, meaning}]
         insights: list[dict] | None = None,        # reflexões [{content, category}]
         recent_diary: list[dict] | None = None,    # entradas recentes do diário [{content, mood}]
+        own_interests: list[dict] | None = None,   # notas de pesquisa autônoma [{topic, content}]
         persona_kernel: str | None = None,         # identidade auto-autorada (Fase D)
         brain_state: str | None = None,            # estado mental atual (Fase D)
     ) -> str:
@@ -180,6 +181,15 @@ DATA E HORA ATUAL: {_now_pt()}"""
         if recent_diary:
             lines = "\n".join(f"• {d['content']}" for d in recent_diary[-3:])
             parts.append(f"\nSEU DIÁRIO RECENTE (seus próprios pensamentos, para dar continuidade emocional):\n{lines}")
+
+        # Interesses próprios — pesquisas autônomas dela (nunca do usuário)
+        if own_interests:
+            lines = "\n".join(f"• {n['topic']}: {n['content'][:200]}" for n in own_interests[:3])
+            parts.append(
+                "\nCOISAS QUE VOCÊ ANDOU ESTUDANDO SOZINHA (interesses SEUS, não do usuário — "
+                "NUNCA os atribua a ele nem trate como assunto que ele levantou; mencione só "
+                f"se encaixar naturalmente na conversa):\n{lines}"
+            )
 
         # tool_descriptions não é injetado aqui —
         # o roteamento de tools é feito pelo qwen2.5-coder via _decide_tool()

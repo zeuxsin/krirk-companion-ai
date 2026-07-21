@@ -696,6 +696,53 @@ try:
 finally:
     shutil.rmtree(tmp5, ignore_errors=True)
 
+# ── Dedupe FUZZY: variações mínimas do mesmo fato não acumulam ──────────────
+from backend.memory.memory_manager import _facts_similar
+
+check("fuzzy: variacao minima e similar", _facts_similar(
+    "usuário organiza projetos em pastas dentro de uma pasta chamada code",
+    "usuário organiza projetos em pastas dentro de uma pasta chamada \"code"))
+check("fuzzy: reformulacao leve e similar", _facts_similar(
+    "usuário tem interesse em desenvolvimento de software",
+    "usuário tem interesse em desenvolvimento de softwares"))
+check("fuzzy: fatos DIFERENTES nao sao similares", not _facts_similar(
+    "usuário mora em Cariacica", "usuário trabalha com programação"))
+check("fuzzy: vazio nunca e similar", not _facts_similar("", "usuário mora em Vitória"))
+
+tmpfz = Path(tempfile.mkdtemp(prefix="krirk_fz_"))
+try:
+    mmfz = MemoryManager(db_path=str(tmpfz / "t.db"), chroma_path=str(tmpfz / "c"))
+    mmfz._vectors = None
+    UF = "fz-user"
+    check("save: primeiro fato insere", mmfz.save_fact(UF, "usuário organiza projetos na pasta code"))
+    check("save: quase igual REFORCA em vez de inserir",
+          not mmfz.save_fact(UF, "usuário organiza projetos na pasta \"code\""))
+    check("save: so 1 fato no banco", len(mmfz.get_facts_full(UF)) == 1)
+
+    # compactação retroativa: injeta duplicatas direto no banco (simula acumulo antigo)
+    with mmfz._conn() as _c:
+        for f in ("usuário gosta de jogos de estratégia",
+                  "usuário gosta de jogos de estratégia!",
+                  "usuário gosta  de jogos de estrategia",
+                  "usuário tem um gato chamado Mingau"):
+            _c.execute(
+                "INSERT INTO facts (user_id, fact, category, confidence, pinned, created_at, updated_at) "
+                "VALUES (?, ?, 'general', 0.8, 0, datetime('now'), datetime('now'))", (UF, f))
+    _merged = mmfz.dedupe_similar_facts(UF)
+    check("compactacao funde as quase iguais", _merged == 2)
+    _rest = [f["fact"] for f in mmfz.get_facts_full(UF)]
+    check("compactacao preserva 1 de cada grupo",
+          len(_rest) == 3 and any("Mingau" in f for f in _rest)
+          and sum("estrat" in _normalize_fact(f) for f in _rest) == 1)
+    check("compactacao e idempotente", mmfz.dedupe_similar_facts(UF) == 0)
+
+    # notas de pesquisa: interesses dela p/ o prompt
+    mmfz.add_learning_note(UF, "guitarras artesanais", "dá pra fazer com calotas", "web")
+    _notas = mmfz.get_recent_notes(UF, limit=3)
+    check("get_recent_notes retorna a nota", _notas and _notas[0]["topic"] == "guitarras artesanais")
+finally:
+    shutil.rmtree(tmpfz, ignore_errors=True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 13. Interioridade Fase A — léxico, reflexões, diário, humor
@@ -780,11 +827,14 @@ prompt = ps.build_system_prompt(
     lexicon=[{"term": "farmar aura de neandertal", "meaning": "chamar de burro"}],
     insights=[{"content": "anda jogando muito terror", "category": "insight"}],
     recent_diary=[{"content": "fiquei animada com o projeto dele", "mood": "empolgada"}],
+    own_interests=[{"topic": "guitarras artesanais", "content": "dá pra fazer com calotas"}],
     brain_state="caótica e imprevisível",
 )
 check("prompt injeta lexicon", "farmar aura de neandertal" in prompt)
 check("prompt injeta insight", "jogando muito terror" in prompt)
 check("prompt injeta diario", "animada com o projeto" in prompt)
+check("prompt injeta interesses proprios dela", "guitarras artesanais" in prompt)
+check("prompt avisa que interesses NAO sao do usuario", "NUNCA os atribua a ele" in prompt)
 check("prompt injeta brain_state", "caótica" in prompt)
 check("nucleo imutavel preservado (sem emoji)", "Nunca use emojis" in prompt)
 
@@ -1133,6 +1183,17 @@ check("resposta canned de delegate_code usa 'Abri' correto (nao 'Abrai')",
       "Abri o Claude Code numa janela pra trabalhar" in orq_src
       and "Abrai o Claude" not in orq_src)
 check("pergunta educada e pedido de acao", "POLITE QUESTION = REQUEST" in orq_src)
+
+# Anti-contaminação: pesquisa DELA não vira fato/relação SUA
+check("extracao de fatos pula reacoes curtas",
+      orq_src.count("_is_acceptance(user_msg) or _is_smalltalk(user_msg)") >= 2)
+check("extracao exige fonte = palavras do usuario", "REGRA CRÍTICA DE FONTE" in orq_src)
+check("KG marca fala da assistente como contexto", "NÃO é fonte" in orq_src)
+proact_src = (Path(__file__).parent.parent / "backend" / "core" / "proactive.py").read_text(encoding="utf-8")
+check("share de notas desligado por padrao", 'rcfg.get("share_notes", False)' in proact_src)
+check("bloco de share respeita a trava", "self._share_notes and" in proact_src)
+check("boot compacta memorias quase iguais",
+      "dedupe_similar_facts" in (Path(__file__).parent.parent / "backend" / "api" / "app.py").read_text(encoding="utf-8"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
