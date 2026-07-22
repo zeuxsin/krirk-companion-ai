@@ -92,9 +92,10 @@ def create_app() -> FastAPI:
             orchestrator.memory.purge_stale_facts("default")
         except Exception as e:
             print(f"[KRIRK][memory] Purge falhou: {e}")
-        # Compactação: funde memórias quase idênticas acumuladas (dedupe fuzzy)
+        # Compactação: funde memórias e bordões quase idênticos acumulados
         try:
             orchestrator.memory.dedupe_similar_facts("default")
+            orchestrator.memory.dedupe_similar_terms("default")
         except Exception as e:
             print(f"[KRIRK][memory] Dedupe fuzzy falhou: {e}")
         await proactive_monitor.start()

@@ -78,7 +78,9 @@ class ReflectionEngine:
             '{\n'
             '  "insights": ["1-3 percepções sobre o usuário (padrões, estado, interesses em alta)"],\n'
             '  "humor": "1 frase sobre o estilo de humor dele, se deu para notar (ou vazio)",\n'
-            '  "bordoes": [{"term": "gíria/piada recorrente que virou coisa de vocês", "meaning": "..."}],\n'
+            '  "bordoes": [{"term": "EXPRESSÃO EXATA que o usuário REALMENTE usou na conversa acima e que virou marca dele", "meaning": "..."}],\n'
+            "  (bordões: SÓ inclua se a expressão apareceu LITERALMENTE na conversa. "
+            "NUNCA invente gíria nova nem tire do seu diário/sonho — na dúvida, lista vazia.)\n"
             '  "sonho": "1-2 frases em 1a pessoa, o que passou pela sua cabeça pensando nele"\n'
             '}'
         )
@@ -108,9 +110,16 @@ class ReflectionEngine:
         if humor:
             mem.add_reflection(user_id, humor, category="humor", salience=1.0)
 
+        # Bordão só é cunhado se ANCORADO na conversa real (não invenção do sonho).
+        # Foi o furo que gerou 'conta salva' a partir de uma cena de mercado no diário.
+        from backend.memory.memory_manager import _phrase_grounded_in
         for b in data.get("bordoes", []):
             if isinstance(b, dict) and b.get("term") and b.get("meaning"):
-                mem.add_term(user_id, str(b["term"]), str(b["meaning"]), origin="sonho")
+                term = str(b["term"])
+                if _phrase_grounded_in(term, convo):
+                    mem.add_term(user_id, term, str(b["meaning"]), origin="sonho")
+                else:
+                    print(f"[KRIRK][dream] bordão descartado (não saiu da conversa): {term!r}")
 
         sonho = str(data.get("sonho", "")).strip()
         if sonho:

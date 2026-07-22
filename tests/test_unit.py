@@ -776,6 +776,59 @@ try:
     check("delete_term inexistente -> False", mmA.delete_term(U, "nao existe") is False)
     check("lexicon preserva o outro termo", len(mmA.get_lexicon(U)) == 1)
 
+    # ── Léxico: dedupe fuzzy + filtro de força + compactação (bug 'conta salva') ──
+    from backend.memory.memory_manager import _terms_similar, _phrase_grounded_in
+    check("termos: 'conta salva' ~ 'contas salvas'", _terms_similar("conta salva", "contas salvas"))
+    check("termos: 'conta salva' ~ 'A conta tá salva' (subconjunto)",
+          _terms_similar("conta salva", "A conta tá salva"))
+    check("termos: 'aura de neandertal' ~ 'farmar aura de neandertal'",
+          _terms_similar("aura de neandertal", "farmar aura de neandertal"))
+    check("termos: bordoes DIFERENTES nao sao similares",
+          not _terms_similar("Beleza então", "Phantom System"))
+    check("termos: palavra unica nao vira subconjunto de tudo",
+          not _terms_similar("código", "código legado do salão"))
+
+    check("ancoragem: expressao que saiu da conversa passa",
+          _phrase_grounded_in("farmar aura", "cara você vai farmar aura de neandertal assim"))
+    check("ancoragem: invencao do sonho e barrada",
+          not _phrase_grounded_in("conta salva", "vou jogar persona 3 mais tarde"))
+
+    mmB = MemoryManager(db_path=str(tmpA / "lex.db"), chroma_path=str(tmpA / "cx"))
+    mmB._vectors = None
+    UL = "lex-user"
+    # add_term com variação mínima reforça em vez de duplicar
+    check("add_term novo (conversa)", mmB.add_term(UL, "conta salva", "piada de mercado", origin="conversa"))
+    check("add_term variacao REFORCA", not mmB.add_term(UL, "contas salvas", "idem"))
+    check("so 1 termo apos variacao", len(mmB.get_lexicon_full(UL)) == 1)
+
+    # filtro de força do prompt: gíria de sonho nunca usada NÃO entra
+    mmB.add_term(UL, "giria de sonho fraca", "inventada no sonho", origin="sonho")  # usage 0
+    mmB.add_term(UL, "bordao sonho usado", "reusado", origin="sonho")
+    for _ in range(3):  # >= LEXICON_MIN_USAGE
+        mmB.touch_term(UL, "bordao sonho usado")
+    mmB.add_term(UL, "sonho pouco usado", "so 2 usos", origin="sonho")
+    mmB.touch_term(UL, "sonho pouco usado"); mmB.touch_term(UL, "sonho pouco usado")  # usage 2
+    inj = [t["term"] for t in mmB.get_lexicon(UL)]
+    check("prompt injeta bordao da conversa", "conta salva" in inj)
+    check("prompt injeta bordao de sonho MUITO usado", "bordao sonho usado" in inj)
+    check("prompt NAO injeta giria de sonho nunca usada", "giria de sonho fraca" not in inj)
+    check("prompt NAO injeta sonho com poucos usos (regua alta)", "sonho pouco usado" not in inj)
+    check("full ainda mostra tudo (UI)", len(mmB.get_lexicon_full(UL)) == 4)
+
+    # compactação retroativa: injeta as 4 variações direto e funde
+    with mmB._conn() as _c:
+        for t, o, u in [("A conta tá salva", "sonho", 0), ("Conta salva!", "sonho", 1),
+                        ("a conta salva", "sonho", 0)]:
+            _c.execute("INSERT INTO lexicon (user_id, term, meaning, origin, usage_count, pinned, created_at, last_used) "
+                       "VALUES (?,?,?,?,?,0,datetime('now'),datetime('now'))", (UL, t, "var", o, u))
+    _m = mmB.dedupe_similar_terms(UL)
+    check("compacta as variacoes de 'conta salva'", _m == 3)
+    termos = mmB.get_lexicon_full(UL)
+    conta = [t for t in termos if _terms_similar(t["term"], "conta salva")]
+    check("sobra 1 'conta salva', origem conversa preservada",
+          len(conta) == 1 and conta[0]["origin"] == "conversa")
+    check("compactacao e idempotente", mmB.dedupe_similar_terms(UL) == 0)
+
     # Reflexões
     mmA.add_reflection(U, "o usuario anda jogando muito terror", category="insight")
     mmA.add_reflection(U, "humor sarcastico e referencias de games", category="humor")
@@ -911,7 +964,8 @@ try:
     # Tier 0 aplica direto
     r0 = cm.stage("lexicon_add", {"term": "test", "meaning": "teste"})
     check("tier 0 aplica direto", r0["applied"] is True)
-    check("lexicon recebeu o termo", len(mmC.get_lexicon(U)) == 1)
+    # get_lexicon_full = armazenamento (get_lexicon filtra os fracos p/ o prompt)
+    check("lexicon recebeu o termo", len(mmC.get_lexicon_full(U)) == 1)
 
     # Tier 2 encena como proposta
     mmC.save_fact(U, "fato a"); mmC.save_fact(U, "fato b")

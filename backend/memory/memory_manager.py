@@ -43,6 +43,50 @@ def _facts_similar(a: str, b: str, threshold: float = FUZZY_DUP_THRESHOLD) -> bo
     return sm.ratio() >= threshold
 
 
+# Usos mínimos para um bordão SEM lastro (não fixado, não vindo da conversa)
+# chegar ao prompt. Régua alta de propósito: usage_count também sobe quando o
+# sonho re-cunha o mesmo termo, então 1-2 usos não provam nada.
+LEXICON_MIN_USAGE = 3
+
+# Palavras vazias ignoradas ao comparar/ancorar bordões (termos são frases curtas)
+_TERM_STOPWORDS = {
+    "a", "o", "as", "os", "de", "da", "do", "e", "ta", "que", "um", "uma",
+    "no", "na", "pra", "pro", "com", "em", "se", "the",
+}
+
+
+def _term_words(term: str) -> set[str]:
+    """Palavras significativas de um bordão (normalizadas, sem stopwords)."""
+    return {w for w in _normalize_fact(term).split() if w and w not in _TERM_STOPWORDS}
+
+
+def _terms_similar(a: str, b: str) -> bool:
+    """
+    True se dois bordões são o mesmo conceito. Além do fuzzy textual, considera
+    similar quando as palavras significativas de um (≥2) são subconjunto do outro
+    — pega 'conta salva' ⊆ 'a conta tá salva' e 'aura de neandertal' ⊆
+    'farmar aura de neandertal', que o ratio textual sozinho não pegaria.
+    """
+    na, nb = _normalize_fact(a), _normalize_fact(b)
+    if na == nb:
+        return True
+    wa, wb = _term_words(a), _term_words(b)
+    if wa and wb:
+        small, big = (wa, wb) if len(wa) <= len(wb) else (wb, wa)
+        if len(small) >= 2 and small <= big:
+            return True
+    return _facts_similar(a, b, threshold=0.82)
+
+
+def _phrase_grounded_in(phrase: str, text: str) -> bool:
+    """True se TODAS as palavras significativas da frase aparecem no texto —
+    usado para só cunhar bordão que realmente saiu da conversa (não do sonho)."""
+    words = _term_words(phrase)
+    if not words:
+        return False
+    return words <= set(_normalize_fact(text).split())
+
+
 def _effective_confidence(confidence: float, updated_at: str, pinned: bool, now: datetime) -> float:
     """Confiança com decay exponencial por idade. Fatos fixados nunca decaem."""
     if pinned:
@@ -478,13 +522,13 @@ class MemoryManager:
         if not term or not meaning:
             return False
         now = datetime.now().isoformat()
-        norm = _normalize_fact(term)
         with self._conn() as conn:
             for r in conn.execute("SELECT id, term FROM lexicon WHERE user_id = ?", (user_id,)).fetchall():
-                if _normalize_fact(r["term"]) == norm:
+                # dedupe exato OU fuzzy (variação mínima do mesmo bordão reforça)
+                if _terms_similar(r["term"], term):
                     conn.execute(
-                        "UPDATE lexicon SET meaning=?, usage_count=usage_count+1, last_used=?, pinned=MAX(pinned,?) WHERE id=?",
-                        (meaning, now, int(pinned), r["id"])
+                        "UPDATE lexicon SET usage_count=usage_count+1, last_used=?, pinned=MAX(pinned,?) WHERE id=?",
+                        (now, int(pinned), r["id"])
                     )
                     return False
             conn.execute(
@@ -498,13 +542,22 @@ class MemoryManager:
                               {"user_id": user_id, "type": "lexicon"})
         return True
 
-    def get_lexicon(self, user_id: str, limit: int = 20) -> list[dict]:
-        """Bordões para injetar no prompt — fixados e mais usados primeiro."""
+    def get_lexicon(self, user_id: str, limit: int = 12) -> list[dict]:
+        """
+        Bordões para injetar no prompt — só os COM LASTRO: fixados, os que
+        nasceram na conversa (origin='conversa'), ou os MUITO reusados.
+        A régua alta (>= LEXICON_MIN_USAGE) vale porque usage_count mistura
+        "ela reusou de verdade" com "o sonho re-cunhou" — foi assim que
+        'Conta salva!' (inventado num sonho sobre mercado) acabou forçado
+        numa conversa sobre Persona 3.
+        """
         with self._conn() as conn:
             rows = conn.execute(
                 """SELECT term, meaning FROM lexicon WHERE user_id = ?
-                   ORDER BY pinned DESC, usage_count DESC, last_used DESC LIMIT ?""",
-                (user_id, limit)
+                   AND (pinned = 1 OR origin = 'conversa' OR usage_count >= ?)
+                   ORDER BY pinned DESC, (origin = 'conversa') DESC,
+                            usage_count DESC, last_used DESC LIMIT ?""",
+                (user_id, LEXICON_MIN_USAGE, limit)
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -539,6 +592,39 @@ class MemoryManager:
                     conn.execute("DELETE FROM lexicon WHERE id=?", (r["id"],))
                     return True
         return False
+
+    def dedupe_similar_terms(self, user_id: str = "default") -> int:
+        """
+        Compacta bordões quase iguais acumulados (as 4 variações de 'conta
+        salva', 3 de 'aura de neandertal'...). Em cada grupo sobrevive o de
+        maior prioridade — fixado > nascido na conversa > mais usado > recente
+        — herdando a SOMA dos usos do grupo. Determinístico, sem LLM.
+        """
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, term, origin, usage_count, pinned, created_at FROM lexicon WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()]
+            rows.sort(key=lambda r: (r["pinned"], r["origin"] == "conversa",
+                                     r["usage_count"], r["created_at"]), reverse=True)
+            merged = 0
+            survivors: list[dict] = []
+            for r in rows:
+                keeper = next((s for s in survivors if _terms_similar(s["term"], r["term"])), None)
+                if keeper is None:
+                    survivors.append(r)
+                    continue
+                conn.execute(
+                    """UPDATE lexicon SET usage_count = usage_count + ?, pinned = MAX(pinned, ?),
+                       origin = CASE WHEN origin='conversa' OR ?='conversa' THEN 'conversa' ELSE origin END
+                       WHERE id = ?""",
+                    (r["usage_count"], r["pinned"], r["origin"], keeper["id"])
+                )
+                conn.execute("DELETE FROM lexicon WHERE id = ?", (r["id"],))
+                merged += 1
+        if merged:
+            print(f"[KRIRK][memory] Compactados {merged} bordões quase iguais")
+        return merged
 
     # ── Reflexões / insights ──────────────────────────────────────────────────
 
